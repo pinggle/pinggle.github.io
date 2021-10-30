@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://pinggle.github.io</id>
     <title>冲鸭</title>
-    <updated>2021-10-01T09:40:22.854Z</updated>
+    <updated>2021-10-30T23:37:15.687Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://pinggle.github.io"/>
     <link rel="self" href="https://pinggle.github.io/atom.xml"/>
@@ -10,4 +10,19 @@
     <logo>https://pinggle.github.io/images/avatar.png</logo>
     <icon>https://pinggle.github.io/favicon.ico</icon>
     <rights>All rights reserved 2021, 冲鸭</rights>
+    <entry>
+        <title type="html"><![CDATA[dex文件解析]]></title>
+        <id>https://pinggle.github.io/post/dex-wen-jian-jie-xi/</id>
+        <link href="https://pinggle.github.io/post/dex-wen-jian-jie-xi/">
+        </link>
+        <updated>2021-10-30T08:15:40.000Z</updated>
+        <content type="html"><![CDATA[<p>dex文件是什么？<br>
+dex文件是google为android中的Java代码专门设计的可执行文件，全名: Dalvik eXecutable File.</p>
+<p>先看一张图，全览一下: (来自非虫大佬)<br>
+<img src="https://pinggle.github.io/post-images/1635582737798.jpg" alt="" loading="lazy"></p>
+<p>结构分层如下:</p>
+<p>参考:<br>
+http://aospxref.com/android-9.0.0_r61/xref/dalvik/libdex/DexFile.h</p>
+]]></content>
+    </entry>
 </feed>
