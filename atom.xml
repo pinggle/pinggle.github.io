@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://pinggle.github.io</id>
-    <title>冲鸭</title>
-    <updated>2021-10-30T23:37:15.687Z</updated>
+    <title>pinggle的博客</title>
+    <updated>2021-10-30T23:38:11.059Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://pinggle.github.io"/>
     <link rel="self" href="https://pinggle.github.io/atom.xml"/>
-    <subtitle>定期复盘，温故知新</subtitle>
+    <subtitle>持之以恒、耐心、专注。</subtitle>
     <logo>https://pinggle.github.io/images/avatar.png</logo>
     <icon>https://pinggle.github.io/favicon.ico</icon>
-    <rights>All rights reserved 2021, 冲鸭</rights>
+    <rights>All rights reserved 2021, pinggle的博客</rights>
     <entry>
         <title type="html"><![CDATA[dex文件解析]]></title>
         <id>https://pinggle.github.io/post/dex-wen-jian-jie-xi/</id>
