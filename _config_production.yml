@@ -24,8 +24,8 @@ default_lang: "zh-Hans"
 # Github
 github:
   enabled: true
-  owner: zhonger
-  repository: jekyll-theme-H2O-ac
+  owner: pinggle
+  repository: pinggle
 
 # PWA
 pwa:
@@ -61,9 +61,9 @@ footer:
   since: 2015
 
 # Author 配置博主信息
-author: 'zhonger'
-nickname: 'zhonger'
-bio: '全栈开发者，热爱前端、运维和架构设计'
+author: 'pinggle'
+nickname: 'pinggle'
+bio: 'java'
 avatar: '/assets/img/profile.webp'
 
 # Search
@@ -98,16 +98,16 @@ postPatterns: 'circuitBoard'
 # SNS settings 配置社交网站
 # url: email, weibo, zhihu, twitter, instagram, juejin, github, douban, facebook, dribble, uicn, jianshu, medium, linkedin
 sns:
-  google-scholar: 'https://scholar.google.com/citations?user=AUupIooAAAAJ'
-  researchgate: 'https://www.researchgate.net/profile/Shengzhou-Li'
-  ORCID: 'https://orcid.org/0000-0001-6973-3825'
-  github: 'https://github.com/zhonger'
-  linkedin: 'https://www.linkedin.com/in/shengzhouli/'
-  segmentfault: 'https://segmentfault.com/u/wuwozhonger'
+#  google-scholar: 'https://scholar.google.com/citations?user=AUupIooAAAAJ'
+#  researchgate: 'https://www.researchgate.net/profile/Shengzhou-Li'
+#  ORCID: 'https://orcid.org/0000-0001-6973-3825'
+  github: 'https://github.com/pinggle'
+#  linkedin: 'https://www.linkedin.com/in/shengzhouli/'
+#  segmentfault: 'https://segmentfault.com/u/wuwozhonger'
 
 # Links 友情链接
 links:
-  'Mr Li': 'https://lisz.me'
+  'pinggle': 'https://github.com/pinggle'
 
 # Calendar 日历
 calendar: true
