@@ -1,0 +1,495 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>[实验3_app]_[2.5_开发Android应用程序来使用硬件访问服务] | pinggle的博客</title>
+<link rel="shortcut icon" href="https://pinggle.github.io/favicon.ico?v=1739421496780">
+<link href="https://cdn.jsdelivr.net/npm/remixicon@2.3.0/fonts/remixicon.css" rel="stylesheet">
+<link rel="stylesheet" href="https://pinggle.github.io/styles/main.css">
+<link rel="alternate" type="application/atom+xml" title="[实验3_app]_[2.5_开发Android应用程序来使用硬件访问服务] | pinggle的博客 - Atom Feed" href="https://pinggle.github.io/atom.xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Droid+Serif:400,700">
+
+
+
+    <meta name="description" content="回顾
+我们首先看一下Android体系结构图：
+
+在第2章，我们从 Linux Device Drivers，到 HAL，External Libraries &amp; Android Runtime，Application Framew..." />
+    <meta name="keywords" content="Android系统源代码情景分析" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+    <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.1/build/highlight.min.js"></script>
+  </head>
+  <body>
+    <div class="main">
+      <div class="main-content">
+        <div class="site-header">
+  <a href="https://pinggle.github.io">
+  <img class="avatar" src="https://pinggle.github.io/images/avatar.png?v=1739421496780" alt="">
+  </a>
+  <h1 class="site-title">
+    pinggle的博客
+  </h1>
+  <p class="site-description">
+    专注，耐心，持之以恒
+禁忌: 急躁,贪心
+  </p>
+  <div class="menu-container">
+    
+      
+        <a href="/" class="menu">
+          首页
+        </a>
+      
+    
+      
+        <a href="/archives" class="menu">
+          归档
+        </a>
+      
+    
+      
+        <a href="/tags" class="menu">
+          标签
+        </a>
+      
+    
+      
+        <a href="/post/about" class="menu">
+          关于
+        </a>
+      
+    
+  </div>
+  <div class="social-container">
+    
+      
+    
+      
+    
+      
+    
+      
+    
+      
+    
+  </div>
+</div>
+
+        <div class="post-detail">
+          <article class="post">
+            <h2 class="post-title">
+              [实验3_app]_[2.5_开发Android应用程序来使用硬件访问服务]
+            </h2>
+            <div class="post-info">
+              <span>
+                2025-02-11
+              </span>
+              <span>
+                12 min read
+              </span>
+              
+                <a href="https://pinggle.github.io/tag/fuSoIh1dGr/" class="post-tag">
+                  # Android系统源代码情景分析
+                </a>
+              
+            </div>
+            
+            <div class="post-content-wrapper">
+              <div class="post-content" v-pre>
+                <h2 id="回顾">回顾</h2>
+<p>我们首先看一下Android体系结构图：<br>
+<img src="https://pinggle.github.io/post-images/1739268928321.png" alt="" loading="lazy"></p>
+<p>在第2章，我们从 Linux Device Drivers，到 HAL，External Libraries &amp; Android Runtime，Application Framework 再到 Applications，自底向上实现来一个应用程序控制Freg硬件驱动。</p>
+<p>画图：https://www.processon.com/diagraming/674eb1c592740c307cc423ea</p>
+<figure data-type="image" tabindex="1"><img src="https://pinggle.github.io/post-images/1739268983833.png" alt="" loading="lazy"></figure>
+<h2 id="25开发android应用程序来使用硬件访问服务">2.5,开发Android应用程序来使用硬件访问服务</h2>
+<p>目标：开发Android应用程序，通过硬件访问服务FregService来访问虚拟硬件设备freg的寄存器val的值。</p>
+<p>Freg应用程序的目录结构：</p>
+<pre><code class="language-shell">aosp/packages/experimental/Freg
+----AndroidManifest.xml
+----Android.mk
+----src
+    ----shy/luo/freg
+        ----Freg.java
+----res
+    ----layout
+        ----main.xml
+    ----values
+        ----strings.xml
+    ----drawable
+        ----icon.png
+</code></pre>
+<p>Freg应用程序包含一个源代码目录src，一个资源目录res，一个配置文件AndroidManifest.xml和一个编译脚本文件Android.mk。</p>
+<h3 id="fregjava">Freg.java</h3>
+<p>文件路径：packages/experimental/Freg/src/shy/luo/freg/Freg.java</p>
+<p>文件定义了一个Activity组件Freg，它是应用程序Freg的主界面。在Activity组件Freg的界面上，有一个编辑框和三个按钮Read、Write和Clear，其中，编辑框用来显示或者输入虚拟硬件设备freg的寄存器val的值；按钮Read和Write分别用来读写虚拟硬件设备freg的寄存器val，而按钮Clear用来清空编辑框。</p>
+<pre><code class="language-java">package shy.luo.freg;
+
+import android.app.Activity;
+import android.os.ServiceManager;
+import android.os.Bundle;
+import android.os.IFregService;
+import android.os.RemoteException;
+import android.util.Log;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.Button;
+import android.widget.EditText;
+
+public class Freg extends Activity implements OnClickListener {
+    private final static String LOG_TAG = &quot;shy.luo.freg.FregActivity&quot;;
+
+    private IFregService fregService = null;
+
+    private EditText valueText = null;
+    private Button readButton = null;
+    private Button writeButton = null;
+    private Button clearButton = null;
+
+    /** Called when the activity is first created. */
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.main);
+
+        // 通过 Service Manager 获得一个名称为&quot;freg&quot;的服务的Binder代理对象接口。
+        // 这个服务对应于运行在系统进程System中的硬件访问服务FregService。
+        fregService = IFregService.Stub.asInterface(
+                ServiceManager.getService(&quot;freg&quot;));
+
+        valueText = (EditText) findViewById(R.id.edit_value);
+        readButton = (Button) findViewById(R.id.button_read);
+        writeButton = (Button) findViewById(R.id.button_write);
+        clearButton = (Button) findViewById(R.id.button_clear);
+
+        readButton.setOnClickListener(this);
+        writeButton.setOnClickListener(this);
+        clearButton.setOnClickListener(this);
+
+        Log.i(LOG_TAG, &quot;Freg Activity Created&quot;);
+    }
+
+    @Override
+    public void onClick(View v) {
+        if (v.equals(readButton)) {
+            try {
+                int val = fregService.getVal();
+                String text = String.valueOf(val);
+                valueText.setText(text);
+                Log.i(LOG_TAG, &quot;Freg App read val :&quot; + text);
+            } catch (RemoteException e) {
+                Log.e(LOG_TAG, &quot;Remote Exception while reading value from freg service.&quot;);
+            }
+        } else if (v.equals(writeButton)) {
+            try {
+                String text = valueText.getText().toString();
+                int val = Integer.parseInt(text);
+                fregService.setVal(val);
+                Log.i(LOG_TAG, &quot;Freg App write val :&quot; + val);
+            } catch (RemoteException e) {
+                Log.e(LOG_TAG, &quot;Remote Exception while writing value to freg service.&quot;);
+            }
+        } else if (v.equals(clearButton)) {
+            String text = &quot;&quot;;
+            valueText.setText(text);
+        }
+    }
+}
+</code></pre>
+<h3 id="mainxml">main.xml</h3>
+<p>文件路径：packages/experimental/Freg/res/layout/main.xml</p>
+<p>这是应用程序Freg的主界面配置文件，在屏幕中显示一个 TextView 空间和三个 Button 控件。</p>
+<pre><code class="language-xml">&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;
+&lt;LinearLayout xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;
+    android:orientation=&quot;vertical&quot;
+    android:layout_width=&quot;fill_parent&quot;
+    android:layout_height=&quot;fill_parent&quot;
+    &gt;
+    &lt;LinearLayout
+        android:layout_width=&quot;fill_parent&quot;
+        android:layout_height=&quot;wrap_content&quot;
+        android:orientation=&quot;vertical&quot;
+        android:gravity=&quot;center&quot;&gt;
+        &lt;TextView
+            android:layout_width=&quot;wrap_content&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:text=&quot;@string/value&quot;&gt;
+        &lt;/TextView&gt;
+        &lt;EditText
+            android:layout_width=&quot;fill_parent&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:id=&quot;@+id/edit_value&quot;
+            android:hint=&quot;@string/hint&quot;&gt;
+        &lt;/EditText&gt;
+    &lt;/LinearLayout&gt;
+     &lt;LinearLayout
+        android:layout_width=&quot;fill_parent&quot;
+        android:layout_height=&quot;wrap_content&quot;
+        android:orientation=&quot;horizontal&quot;
+        android:gravity=&quot;center&quot;&gt;
+        &lt;Button
+            android:id=&quot;@+id/button_read&quot;
+            android:layout_width=&quot;wrap_content&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:text=&quot;@string/read&quot;&gt;
+        &lt;/Button&gt;
+        &lt;Button
+            android:id=&quot;@+id/button_write&quot;
+            android:layout_width=&quot;wrap_content&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:text=&quot;@string/write&quot;&gt;
+        &lt;/Button&gt;
+        &lt;Button
+            android:id=&quot;@+id/button_clear&quot;
+            android:layout_width=&quot;wrap_content&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:text=&quot;@string/clear&quot;&gt;
+        &lt;/Button&gt;
+    &lt;/LinearLayout&gt;
+&lt;/LinearLayout&gt;
+</code></pre>
+<h3 id="stringsxml">strings.xml</h3>
+<p>文件路径：packages/experimental/Freg/res/values/strings.xml</p>
+<pre><code class="language-xml">&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;
+&lt;resources&gt;
+    &lt;string name=&quot;app_name&quot;&gt;Freg&lt;/string&gt;
+    &lt;string name=&quot;value&quot;&gt;Value&lt;/string&gt;
+    &lt;string name=&quot;hint&quot;&gt;Please input a value...&lt;/string&gt;
+    &lt;string name=&quot;read&quot;&gt;Read&lt;/string&gt;
+    &lt;string name=&quot;write&quot;&gt;Write&lt;/string&gt;
+    &lt;string name=&quot;clear&quot;&gt;Clear&lt;/string&gt;
+&lt;/resources&gt;
+</code></pre>
+<h3 id="iconpng">icon.png</h3>
+<p>文件路径: packages/experimental/Freg/res/drawable/icon.png</p>
+<p>这是应用程序Freg的图标文件，可以根据需要来放置不同的图片文件。</p>
+<h3 id="androidmanifestxml">AndroidManifest.xml</h3>
+<p>文件路径：packages/experimental/Freg/AndroidManifest.xml</p>
+<pre><code class="language-xml">&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;
+&lt;manifest xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;
+      package=&quot;shy.luo.freg&quot;
+      android:versionCode=&quot;1&quot;
+      android:versionName=&quot;1.0&quot;&gt;
+    &lt;application android:icon=&quot;@drawable/icon&quot; android:label=&quot;@string/app_name&quot;&gt;
+        &lt;activity android:name=&quot;.Freg&quot;
+                  android:label=&quot;@string/app_name&quot;&gt;
+            &lt;intent-filter&gt;
+                &lt;action android:name=&quot;android.intent.action.MAIN&quot; /&gt;
+                &lt;category android:name=&quot;android.intent.category.LAUNCHER&quot; /&gt;
+            &lt;/intent-filter&gt;
+        &lt;/activity&gt;
+    &lt;/application&gt;
+&lt;/manifest&gt;
+</code></pre>
+<h3 id="androidmk">Android.mk</h3>
+<p>文件路径：packages/experimental/Freg/Android.mk</p>
+<p>这是应用程序Freg的编译脚本文件，指定程序的名称为&quot;Freg&quot;。</p>
+<pre><code class="language-makefile">LOCAL_PATH:= $(call my-dir)
+include $(CLEAR_VARS)
+
+LOCAL_MODULE_TAGS := optional
+
+LOCAL_SRC_FILES := $(call all-subdir-java-files)
+
+LOCAL_PACKAGE_NAME := Freg
+
+include $(BUILD_PACKAGE)
+</code></pre>
+<h3 id="编译">编译</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./packages/experimental/Freg/
+
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1`
+target R.java/Manifest.java: Freg (out/target/common/obj/APPS/Freg_intermediates/src/R.stamp)
+Warning: AndroidManifest.xml already defines versionCode (in http://schemas.android.com/apk/res/android); using existing value in manifest.
+Warning: AndroidManifest.xml already defines versionName (in http://schemas.android.com/apk/res/android); using existing value in manifest.
+target Java: Freg (out/target/common/obj/APPS/Freg_intermediates/classes)
+Copying: out/target/common/obj/APPS/Freg_intermediates/classes-jarjar.jar
+Copying: out/target/common/obj/APPS/Freg_intermediates/emma_out/lib/classes-jarjar.jar
+Copying: out/target/common/obj/APPS/Freg_intermediates/classes.jar
+Copying: out/target/common/obj/APPS/Freg_intermediates/noproguard.classes.jar
+target Dex: Freg
+Copying: out/target/common/obj/APPS/Freg_intermediates/noproguard.classes.dex
+target Package: Freg (out/target/product/generic/obj/APPS/Freg_intermediates/package.apk)
+Warning: AndroidManifest.xml already defines versionCode (in http://schemas.android.com/apk/res/android); using existing value in manifest.
+Warning: AndroidManifest.xml already defines versionName (in http://schemas.android.com/apk/res/android); using existing value in manifest.
+ 'out/target/common/obj/APPS/Freg_intermediates//classes.dex' as 'classes.dex'...
+Install: out/target/product/generic/system/app/Freg.apk
+make: Leaving directory `/home/dt/2.3.1_r1`
+
+dt@ubuntu:~/2.3.1_r1$ make snod
+
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+Install: out/host/linux-x86/bin/mkyaffs2image
+make snod: ignoring dependencies
+Target system fs image: out/target/product/generic/system.img
+</code></pre>
+<p>打包后，得到的 Android 系统镜像文件 system.img 就包含有应用程序 Freg 了，下面我们启动模拟器看看：</p>
+<h3 id="运行">运行</h3>
+<pre><code class="language-shell">dt@ubuntu:~/goldfish$ cp out/target/product/generic/system.img /mnt/hgfs/AndroidEmulator/images/system.img
+dt@ubuntu:~/goldfish$ cp out/target/product/generic/ramdisk.img /mnt/hgfs/AndroidEmulator/images/ramdisk.img
+
+
+[win]&gt; pushd d:\AndroidEmulator
+[win]&gt; start /b emulator.exe -sysdir d:\AndroidEmulator -system images\system.img -data images\userdata.img -ramdisk images\ramdisk.img -kernel images\zImage -skindir d:\AndroidEmulator\skins -skin HVGA
+
+[win]&gt; adb logcat | grep freg
+I/FregServiceJNI(   66): Initializing HAL stub freg......
+I/FregServiceJNI(   66): Device freg found.
+I/FregHALStub(   66): Open device file /dev/freg successfully.
+I/FregServiceJNI(   66): Device freg is open.
+I/ActivityManager(   66): Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=shy.luo.freg/.Freg } from pid 131
+I/ActivityManager(   66): Start proc shy.luo.freg for activity shy.luo.freg/.Freg: pid=351 uid=10029 gids={}
+I/shy.luo.freg.FregActivity(  351): Freg Activity Created
+I/ActivityManager(   66): Displayed shy.luo.freg/.Freg: +1s853ms
+I/FregHALStub(   66): Get value 0 from device file /dev/freg.
+I/FregServiceJNI(   66): Get value 0 from device freg.
+I/shy.luo.freg.FregActivity(  351): Freg App read val :0
+I/FregServiceJNI(   66): Set value 68 to device freg.
+I/FregHALStub(   66): Set value 68 to device file /dev/freg.
+I/shy.luo.freg.FregActivity(  351): Freg App write val :68
+I/FregHALStub(   66): Get value 68 from device file /dev/freg.
+I/FregServiceJNI(   66): Get value 68 from device freg.
+I/shy.luo.freg.FregActivity(  351): Freg App read val :68
+I/FregServiceJNI(   66): Set value 6 to device freg.
+I/FregHALStub(   66): Set value 6 to device file /dev/freg.
+I/shy.luo.freg.FregActivity(  351): Freg App write val :6
+I/FregHALStub(   66): Get value 6 from device file /dev/freg.
+I/FregServiceJNI(   66): Get value 6 from device freg.
+I/shy.luo.freg.FregActivity(  351): Freg App read val :6
+</code></pre>
+<p>Android模拟器运行起来之后，我们就可以在应用程序启动器中启动应用程序 Freg 了，打开 Freg 输入68，点击【Write】按钮写入值，然后点击【Read】按钮，读取值。</p>
+<figure data-type="image" tabindex="2"><img src="https://pinggle.github.io/post-images/1739269179353.png" alt="" loading="lazy"></figure>
+
+              </div>
+              <div class="toc-container">
+                <ul class="markdownIt-TOC">
+<li>
+<ul>
+<li><a href="#%E5%9B%9E%E9%A1%BE">回顾</a></li>
+<li><a href="#25%E5%BC%80%E5%8F%91android%E5%BA%94%E7%94%A8%E7%A8%8B%E5%BA%8F%E6%9D%A5%E4%BD%BF%E7%94%A8%E7%A1%AC%E4%BB%B6%E8%AE%BF%E9%97%AE%E6%9C%8D%E5%8A%A1">2.5,开发Android应用程序来使用硬件访问服务</a>
+<ul>
+<li><a href="#fregjava">Freg.java</a></li>
+<li><a href="#mainxml">main.xml</a></li>
+<li><a href="#stringsxml">strings.xml</a></li>
+<li><a href="#iconpng">icon.png</a></li>
+<li><a href="#androidmanifestxml">AndroidManifest.xml</a></li>
+<li><a href="#androidmk">Android.mk</a></li>
+<li><a href="#%E7%BC%96%E8%AF%91">编译</a></li>
+<li><a href="#%E8%BF%90%E8%A1%8C">运行</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+              </div>
+            </div>
+          </article>
+        </div>
+
+        
+          <div class="next-post">
+            <div class="next">下一篇</div>
+            <a href="https://pinggle.github.io/post/shi-yan-2_aosp_23_-kai-fa-android-ying-jian-chou-xiang-ceng-mo-kuai-_hal/">
+              <h3 class="post-title">
+                [实验2_aosp]_[2.3_开发Android硬件抽象层模块_HAL]
+              </h3>
+            </a>
+          </div>
+        
+
+        
+
+        <div class="site-footer">
+  Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a>
+  <a class="rss" href="https://pinggle.github.io/atom.xml" target="_blank">
+    <i class="ri-rss-line"></i> RSS
+  </a>
+</div>
+
+      </div>
+    </div>
+
+    <script>
+      hljs.initHighlightingOnLoad()
+
+      let mainNavLinks = document.querySelectorAll(".markdownIt-TOC a");
+
+      // This should probably be throttled.
+      // Especially because it triggers during smooth scrolling.
+      // https://lodash.com/docs/4.17.10#throttle
+      // You could do like...
+      // window.addEventListener("scroll", () => {
+      //    _.throttle(doThatStuff, 100);
+      // });
+      // Only not doing it here to keep this Pen dependency-free.
+
+      window.addEventListener("scroll", event => {
+        let fromTop = window.scrollY;
+
+        mainNavLinks.forEach((link, index) => {
+          let section = document.getElementById(decodeURI(link.hash).substring(1));
+          let nextSection = null
+          if (mainNavLinks[index + 1]) {
+            nextSection = document.getElementById(decodeURI(mainNavLinks[index + 1].hash).substring(1));
+          }
+          if (section.offsetTop <= fromTop) {
+            if (nextSection) {
+              if (nextSection.offsetTop > fromTop) {
+                link.classList.add("current");
+              } else {
+                link.classList.remove("current");    
+              }
+            } else {
+              link.classList.add("current");
+            }
+          } else {
+            link.classList.remove("current");
+          }
+        });
+      });
+
+    </script>
+  </body>
+</html>

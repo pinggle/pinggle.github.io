@@ -1,0 +1,1337 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>[实验4_C++指针]_[3_C++智能指针] | pinggle的博客</title>
+<link rel="shortcut icon" href="https://pinggle.github.io/favicon.ico?v=1739421496780">
+<link href="https://cdn.jsdelivr.net/npm/remixicon@2.3.0/fonts/remixicon.css" rel="stylesheet">
+<link rel="stylesheet" href="https://pinggle.github.io/styles/main.css">
+<link rel="alternate" type="application/atom+xml" title="[实验4_C++指针]_[3_C++智能指针] | pinggle的博客 - Atom Feed" href="https://pinggle.github.io/atom.xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Droid+Serif:400,700">
+
+
+
+    <meta name="description" content="第3章，智能指针
+问：为什么需要使用智能指针？
+答：主要是为了解决使用C++时，忘记释放指针指向的对象所占用的内存，或者使用了无效指针，造成内存泄漏，甚至系统崩溃。
+问：为什么Android系统的应用程序框架层还要使用C++语言呢？
+答：C..." />
+    <meta name="keywords" content="Android系统源代码情景分析" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+    <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.1/build/highlight.min.js"></script>
+  </head>
+  <body>
+    <div class="main">
+      <div class="main-content">
+        <div class="site-header">
+  <a href="https://pinggle.github.io">
+  <img class="avatar" src="https://pinggle.github.io/images/avatar.png?v=1739421496780" alt="">
+  </a>
+  <h1 class="site-title">
+    pinggle的博客
+  </h1>
+  <p class="site-description">
+    专注，耐心，持之以恒
+禁忌: 急躁,贪心
+  </p>
+  <div class="menu-container">
+    
+      
+        <a href="/" class="menu">
+          首页
+        </a>
+      
+    
+      
+        <a href="/archives" class="menu">
+          归档
+        </a>
+      
+    
+      
+        <a href="/tags" class="menu">
+          标签
+        </a>
+      
+    
+      
+        <a href="/post/about" class="menu">
+          关于
+        </a>
+      
+    
+  </div>
+  <div class="social-container">
+    
+      
+    
+      
+    
+      
+    
+      
+    
+      
+    
+  </div>
+</div>
+
+        <div class="post-detail">
+          <article class="post">
+            <h2 class="post-title">
+              [实验4_C++指针]_[3_C++智能指针]
+            </h2>
+            <div class="post-info">
+              <span>
+                2025-02-13
+              </span>
+              <span>
+                37 min read
+              </span>
+              
+                <a href="https://pinggle.github.io/tag/fuSoIh1dGr/" class="post-tag">
+                  # Android系统源代码情景分析
+                </a>
+              
+            </div>
+            
+            <div class="post-content-wrapper">
+              <div class="post-content" v-pre>
+                <h1 id="第3章智能指针">第3章，智能指针</h1>
+<p>问：为什么需要使用智能指针？</p>
+<p>答：主要是为了解决使用C++时，忘记释放指针指向的对象所占用的内存，或者使用了无效指针，造成内存泄漏，甚至系统崩溃。</p>
+<p>问：为什么Android系统的应用程序框架层还要使用C++语言呢？</p>
+<p>答：C++语言编译出的程序性能较Java语言高。</p>
+<p>问：智能指针的基本原理是什么？</p>
+<p>答：智能指针是一种能够自动维护对象引用计数的技术，智能指针是一个对象，而不是一个指针，但是它引用了一个实际使用的对象。智能指针能够自动地维护实际对象的引用计数，在智能指针构造时，增加它所引用的对象的引用计数；在智能指针析构时，减少它所引用的对象的引用计数。由于智能指针的构造和析构都是自动的，因此，它就很自然地实现了自动的对象引用计数技术。</p>
+<p>问：为什么需要引入强引用计数和弱引用计数？</p>
+<p>答：为了解决对象之前互相引用，导致对象无法被释放的问题。</p>
+<h1 id="31轻量级指针">3.1，轻量级指针</h1>
+<p>轻量级指针通过简单的引用计数技术来维护对象的声明周期。如果一个类的对象支持使用轻量级指针，那么它就必须要从 LightRefBase 类继承下来，因为 LightRefBase 类提供了一个简单的引用计数器。</p>
+<h2 id="311实现原理分析">3.1.1.实现原理分析</h2>
+<h3 id="refbaseh">RefBase.h</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<p>备注：这里仅仅列出 轻量级指针 涉及的代码，源文件不止这么多代码。</p>
+<pre><code class="language-c++">/* LightRefBase 类是一个模板类，其中，模板参数 T 表示对象的实际类型。*/
+template &lt;class T&gt;
+class LightRefBase
+{
+public:
+    /* 成员变量 mCount，用来描述一个对象的引用计数值。 */
+    inline LightRefBase() : mCount(0) { }
+    /* incStrong 增加它所引用的对象的引用计数; */
+    inline void incStrong(const void* id) const {
+        android_atomic_inc(&amp;mCount);
+    }
+    /* decStrong 减少它所引用的对象的引用计数; */
+    inline void decStrong(const void* id) const {
+        if (android_atomic_dec(&amp;mCount) == 1) {
+            delete static_cast&lt;const T*&gt;(this);
+            /* 如果对象的引用计数值在减少之后变成0，那么表示需要释放这个对象所占用的内存了。 */
+        }
+    }
+    //! DEBUGGING ONLY: Get current strong ref count.
+    inline int32_t getStrongCount() const {
+        return mCount;
+    }
+   
+protected:
+    inline ~LightRefBase() { }
+   
+private:
+    mutable volatile int32_t mCount;
+};
+
+// ---------------------------------------------------------------------------
+
+/* 轻量级指针的实现类为sp，它同时也是强指针的实现类;
+ * sp 类是一个模板类，其中，模板参数 T 表示对象的实际类型。
+ */
+template &lt;typename T&gt;
+class sp
+{
+public:
+    /* 使用 RefBase::weakref_type 类来维护它所引用的对象的强引用计数和弱引用计数; */
+    typedef typename RefBase::weakref_type weakref_type;
+   
+    /* 成员变量 m_ptr 是一个指针，指向实际引用的对象。 */
+    inline sp() : m_ptr(0) { }
+
+    sp(T* other);
+    sp(const sp&lt;T&gt;&amp; other);
+    template&lt;typename U&gt; sp(U* other);
+    template&lt;typename U&gt; sp(const sp&lt;U&gt;&amp; other);
+
+    ~sp();
+   
+    // Assignment
+
+    sp&amp; operator = (T* other);
+    sp&amp; operator = (const sp&lt;T&gt;&amp; other);
+   
+    template&lt;typename U&gt; sp&amp; operator = (const sp&lt;U&gt;&amp; other);
+    template&lt;typename U&gt; sp&amp; operator = (U* other);
+   
+    //! Special optimization for use by ProcessState (and nobody else).
+    void force_set(T* other);
+   
+    // Reset
+   
+    void clear();
+   
+    // Accessors
+
+    inline  T&amp;      operator* () const  { return *m_ptr; }
+    inline  T*      operator-&gt; () const { return m_ptr;  }
+    inline  T*      get() const         { return m_ptr; }
+
+    // Operators
+       
+    COMPARE(==)
+    COMPARE(!=)
+    COMPARE(&gt;)
+    COMPARE(&lt;)
+    COMPARE(&lt;=)
+    COMPARE(&gt;=)
+
+private:    
+    template&lt;typename Y&gt; friend class sp;
+    template&lt;typename Y&gt; friend class wp;
+
+    // Optimization for wp::promote().
+    sp(T* p, weakref_type* refs);
+   
+    T*              m_ptr;
+};
+
+/* sp类的构造函数，首先初始化 m_ptr，然后调用 m_ptr 的成员函数 incStrong 来增加它的引用计数。*/
+template&lt;typename T&gt;
+sp&lt;T&gt;::sp(T* other)
+    : m_ptr(other)
+{
+    if (other) other-&gt;incStrong(this);
+}
+
+template&lt;typename T&gt;
+sp&lt;T&gt;::sp(const sp&lt;T&gt;&amp; other)
+    : m_ptr(other.m_ptr)
+{
+    if (m_ptr) m_ptr-&gt;incStrong(this);
+}
+
+template&lt;typename T&gt; template&lt;typename U&gt;
+sp&lt;T&gt;::sp(U* other) : m_ptr(other)
+{
+    if (other) other-&gt;incStrong(this);
+}
+
+template&lt;typename T&gt; template&lt;typename U&gt;
+sp&lt;T&gt;::sp(const sp&lt;U&gt;&amp; other)
+    : m_ptr(other.m_ptr)
+{
+    if (m_ptr) m_ptr-&gt;incStrong(this);
+}
+
+/* sp类的析构函数，调用成员变量 m_ptr 的成员函数 decStrong 减少对象的引用计数。 */
+template&lt;typename T&gt;
+sp&lt;T&gt;::~sp()
+{
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+}
+
+template&lt;typename T&gt;
+sp&lt;T&gt;&amp; sp&lt;T&gt;::operator = (const sp&lt;T&gt;&amp; other) {
+    T* otherPtr(other.m_ptr);
+    if (otherPtr) otherPtr-&gt;incStrong(this);
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+    m_ptr = otherPtr;
+    return *this;
+}
+
+template&lt;typename T&gt;
+sp&lt;T&gt;&amp; sp&lt;T&gt;::operator = (T* other)
+{
+    if (other) other-&gt;incStrong(this);
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+    m_ptr = other;
+    return *this;
+}
+
+template&lt;typename T&gt; template&lt;typename U&gt;
+sp&lt;T&gt;&amp; sp&lt;T&gt;::operator = (const sp&lt;U&gt;&amp; other)
+{
+    U* otherPtr(other.m_ptr);
+    if (otherPtr) otherPtr-&gt;incStrong(this);
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+    m_ptr = otherPtr;
+    return *this;
+}
+
+template&lt;typename T&gt; template&lt;typename U&gt;
+sp&lt;T&gt;&amp; sp&lt;T&gt;::operator = (U* other)
+{
+    if (other) other-&gt;incStrong(this);
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+    m_ptr = other;
+    return *this;
+}
+</code></pre>
+<h2 id="312应用实例分析">3.1.2.应用实例分析</h2>
+<p>我们在 aosp/external 目录中建立一个 C++ 应用程序 lightpointer 来说明轻量级指针的使用方法，它的目录结构如下：</p>
+<pre><code class="language-shell">~/aosp
+----external
+    ----lightpointer
+        ----lightpointer.cpp
+        ----Android.mk
+</code></pre>
+<h3 id="lightpointercpp">lightpointer.cpp</h3>
+<p>文件路径：aosp/external/lightpointer/lightpointer.cpp</p>
+<pre><code class="language-C++">#include &lt;stdio.h&gt;
+#include &lt;utils/RefBase.h&gt;
+     
+using  namespace android;
+
+/* LightClass 继承了 LightRefBase类 */
+class LightClass : public LightRefBase&lt;LightClass&gt;
+{
+public:
+    LightClass()
+    {
+        printf(&quot;Construct LightClass Object.\n&quot;);
+    }
+
+    virtual ~LightClass()
+    {
+        printf(&quot;Destory LightClass Object.\n&quot;);
+    }
+};
+
+int main(int argc, char** argv)
+{
+    LightClass* pLightClass = new LightClass();
+    /* 创建轻量级指针 lpOut 引用 LightRefBase */
+    sp&lt;LightClass&gt; lpOut = pLightClass;
+
+    /* 经过构造函数的调用，引用计数值为1; */
+    printf(&quot;Light Ref Count: %d.\n&quot;, pLightClass-&gt;getStrongCount());
+
+    {
+        /* 新建一个轻量级指针 lpInner 来引用 loOut 对象，引用计数增加1; */
+        sp&lt;LightClass&gt; lpInner = lpOut;
+
+        /* 经过构造函数和lpInner的指向，计数器为2; */
+        printf(&quot;Light Ref Count: %d.\n&quot;, pLightClass-&gt;getStrongCount());
+    } // 当走出括号，lpInner 被析构，引用计数减少1;
+
+    /* 经过构造函数和lpInner的指向，然后lpInner被析构，计数器为1; */
+    printf(&quot;Light Ref Count: %d.\n&quot;, pLightClass-&gt;getStrongCount());
+
+    return 0;
+}
+</code></pre>
+<h3 id="androidmk">Android.mk</h3>
+<p>文件路径：aosp/external/lightpointer/Android.mk</p>
+<pre><code class="language-makefile">LOCAL_PATH := $(call my-dir)
+include $(CLEAR_VARS)
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE := lightpointer
+LOCAL_SRC_FILES := lightpointer.cpp
+LOCAL_SHARED_LIBRARIES := \
+    libcutils \
+    libutils
+include $(BUILD_EXECUTABLE)
+</code></pre>
+<p>这是应用程序 lightpointer 的编译脚本文件，它引用了 libcutils 和 libutils 两个库。</p>
+<h3 id="编译运行">编译&amp;运行</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ mmm ./external/lightpointer/
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1'
+target thumb C++: lightpointer &lt;= external/lightpointer/lightpointer.cpp
+target Executable: lightpointer (out/target/product/generic/obj/EXECUTABLES/lightpointer_intermediates/LINKED/lightpointer)
+target Non-prelinked: lightpointer (out/target/product/generic/symbols/system/bin/lightpointer)
+target Strip: lightpointer (out/target/product/generic/obj/EXECUTABLES/lightpointer_intermediates/lightpointer)
+Install: out/target/product/generic/system/bin/lightpointer
+make: Leaving directory `/home/dt/2.3.1_r1'
+
+dt@ubuntu:~/2.3.1_r1$ make snod
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+Install: out/host/linux-x86/bin/mkyaffs2image
+make snod: ignoring dependencies
+Target system fs image: out/target/product/generic/system.img
+
+dt@ubuntu:~/goldfish$ cp out/target/product/generic/system.img /mnt/hgfs/AndroidEmulator/images/system.img
+
+[win]&gt; pushd d:\AndroidEmulator
+[win]&gt; start /b emulator.exe -sysdir d:\AndroidEmulator -system images\system.img -data images\userdata.img -ramdisk images\ramdisk.img -kernel images\zImage -skindir d:\AndroidEmulator\skins -skin HVGA
+
+[win]&gt; adb shell
+# cd /system/bin
+# ./lightpointer
+Construct LightClass Object.
+Light Ref Count: 1.
+Light Ref Count: 2.
+Light Ref Count: 1.
+Destory LightClass Object.
+# 
+</code></pre>
+<h1 id="32强指针和弱指针">3.2.强指针和弱指针</h1>
+<p>强指针和弱指针通过强引用计数和弱引用计数来维护对象的声明周期。如果一个类的对象要支持使用强指针和弱指针，那么它就必须从 RefBase 类继承下来，因为 Refbase 类提供了强引用计数器和弱引用计数器。</p>
+<h2 id="321强指针的实现原理分析">3.2.1,强指针的实现原理分析</h2>
+<h3 id="refbase类">RefBase类</h3>
+<p>文件路径: frameworks/base/include/utils/RefBase.h</p>
+<p>备注：这里仅仅列出 轻量级指针 涉及的代码，源文件不止这么多代码。</p>
+<pre><code class="language-C++">class RefBase
+{
+public:
+    void            incStrong(const void* id) const;
+    void            decStrong(const void* id) const;
+
+    void            forceIncStrong(const void* id) const;
+
+    //! DEBUGGING ONLY: Get current strong ref count.
+    int32_t         getStrongCount() const;
+
+    class weakref_type
+    {
+    public:
+        RefBase*            refBase() const;
+       
+        void                incWeak(const void* id);
+        void                decWeak(const void* id);
+       
+        bool                attemptIncStrong(const void* id);
+       
+        //! This is only safe if you have set OBJECT_LIFETIME_FOREVER.
+        bool                attemptIncWeak(const void* id);
+
+        //! DEBUGGING ONLY: Get current weak ref count.
+        int32_t             getWeakCount() const;
+
+        //! DEBUGGING ONLY: Print references held on object.
+        void                printRefs() const;
+
+        //! DEBUGGING ONLY: Enable tracking for this object.
+        // enable -- enable/disable tracking
+        // retain -- when tracking is enable, if true, then we save a stack trace
+        //           for each reference and dereference; when retain == false, we
+        //           match up references and dereferences and keep only the
+        //           outstanding ones.
+       
+        void                trackMe(bool enable, bool retain);
+    };
+   
+            weakref_type*   createWeak(const void* id) const;
+           
+            weakref_type*   getWeakRefs() const;
+
+            //! DEBUGGING ONLY: Print references held on object.
+    inline  void            printRefs() const { getWeakRefs()-&gt;printRefs(); }
+
+            //! DEBUGGING ONLY: Enable tracking of object.
+    inline  void            trackMe(bool enable, bool retain)
+    {
+        getWeakRefs()-&gt;trackMe(enable, retain);
+    }
+
+protected:
+                            RefBase();
+    virtual                 ~RefBase();
+   
+    //! Flags for extendObjectLifetime()
+    enum {
+        OBJECT_LIFETIME_WEAK    = 0x0001,
+        OBJECT_LIFETIME_FOREVER = 0x0003
+    };
+   
+            void            extendObjectLifetime(int32_t mode);
+           
+    //! Flags for onIncStrongAttempted()
+    enum {
+        FIRST_INC_STRONG = 0x0001
+    };
+   
+    virtual void            onFirstRef();
+    virtual void            onLastStrongRef(const void* id);
+    virtual bool            onIncStrongAttempted(uint32_t flags, const void* id);
+    virtual void            onLastWeakRef(const void* id);
+
+private:
+    friend class weakref_type;
+    class weakref_impl;
+   
+    RefBase(const RefBase&amp; o);
+    RefBase&amp;        operator=(const RefBase&amp; o);
+
+    /* 使用一个 weakref_impl 类型的成员变量 mRefs 来描述对象的引用计数; */
+    weakref_impl* const mRefs;
+};
+</code></pre>
+<p>与 LightRefBase 类一样，RefBase 类也提供了成员函数 incStrong 和 decStrong 来维护它所引用的对象的引用计数。不过，RefBase 类与 LightRefBase 类不一样，它不是直接使用一个整数来维护对象的引用计数的，而是使用一个 weakref_impl 对象，即成员变量 mRefs 来描述对象的引用计数。</p>
+<p>weakref_impl 类同时为对象提供了强引用计数和弱引用计数。</p>
+<h3 id="weakref_impl类">weakref_impl类</h3>
+<p>文件路径: frameworks/base/libs/utils/RefBase.cpp</p>
+<p>备注：这里仅仅列出 轻量级指针 涉及的代码，源文件不止这么多代码。</p>
+<pre><code class="language-C++">/* weakref_impl 类继承了 weakref_type 类*/
+class RefBase::weakref_impl : public RefBase::weakref_type
+{
+public:
+    volatile int32_t    mStrong;
+    volatile int32_t    mWeak;
+    RefBase* const      mBase;
+    volatile int32_t    mFlags;
+
+
+#if !DEBUG_REFS
+
+    weakref_impl(RefBase* base)
+        : mStrong(INITIAL_STRONG_VALUE)
+        , mWeak(0)
+        , mBase(base)
+        , mFlags(0)
+    {
+    }
+
+    void addStrongRef(const void* /*id*/) { }
+    void removeStrongRef(const void* /*id*/) { }
+    void addWeakRef(const void* /*id*/) { }
+    void removeWeakRef(const void* /*id*/) { }
+    void printRefs() const { }
+    void trackMe(bool, bool) { }
+
+#else
+    ......
+#endif
+};
+</code></pre>
+<p>weakref_impl 类继承了 weakref_type 类。weakref_type 类定义在 RefBase 类的内部，它提供了成员函数 incWeak、decWeak、attemptIncStrong 和 attemptIncWeak 来维护对象的强引用计数和弱引用计数。weakref_type 类只定义了引用计数维护接口（操作函数），具体的实现（操作对象）是由 weakref_impl 类提供的。</p>
+<p>weakref_impl 类有两个成员变量 mStrong 和 mWeak 分别用来描述对象的强引用计数和弱引用计数。同时，weakref_impl 类的成员变量 mBase 指向了它所引用的对象的地址，而成员变量 mFlags 是一个标志值，用来描述对象的生命周期控制方式。weakref_impl 类的成员变量 mFlags 的取值范围为 0、OBJECT_LIFE_TIME_WEAK 或者 OBJECT_LIFETIME_FOREVER，其中，0 表示对象的声明周期只受强引用计数影响；OBJECT_LIFETIME_WEAK 表示对象的声明周期同时受强引用计数和弱引用计数影响；OBJECT_LIFETIME_FOREVER 表示对象的声明周期完全不受强引用计数或者弱引用计数影响。</p>
+<h3 id="sp类的构造函数">sp类的构造函数</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+sp&lt;T&gt;::sp(T* other)
+    : m_ptr(other)
+{
+    if (other) other-&gt;incStrong(this);
+}
+</code></pre>
+<p>模块参数 T 是一个继承了 RefBase 类的子类，因此，第5行实际上是调用了 RefBase 类的成员函数 incStrong 来增加对象的强引用计数，如下所示：</p>
+<p>frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">#define INITIAL_STRONG_VALUE (1&lt;&lt;28)
+
+void RefBase::incStrong(const void* id) const
+{
+    weakref_impl* const refs = mRefs;
+    refs-&gt;addWeakRef(id);
+    refs-&gt;incWeak(id); // 增加对象的弱引用计数;
+    refs-&gt;addStrongRef(id);
+
+    const int32_t c = android_atomic_inc(&amp;refs-&gt;mStrong); // 增加对象的强引用计数;
+    LOG_ASSERT(c &gt; 0, &quot;incStrong() called on %p after last strong ref&quot;, refs);
+#if PRINT_REFS
+    LOGD(&quot;incStrong of %p from %p: cnt=%d\n&quot;, this, id, c);
+#endif
+    /* 若 c != INITIAL_STRONG_VALUE 说明该对象不是第一次被引用，INITIAL_STRONG_VALUE是mStrong的初值; */
+    if (c != INITIAL_STRONG_VALUE)  {
+        /* 不是第一次被引用，直接退出函数; */
+        return;
+    }
+
+    /* 下面的逻辑：是第一次被引用，会调用onFirstRef接口; */
+
+    android_atomic_add(-INITIAL_STRONG_VALUE, &amp;refs-&gt;mStrong);
+    /*  如果发现对象是第一次被强指针引用，则调用对象的成员函数 onFristRef 来通知对象，
+     *  它被强指针引用了，以便它可以执行一些业务相关逻辑;
+     *  RefBase类的成员函数 onFristRef 是一个空实现，如果子类想要处理这个事件，
+     *  那么就必须要重写成员函数 onFristRef 。
+     */
+    const_cast&lt;RefBase*&gt;(this)-&gt;onFirstRef();
+}
+</code></pre>
+<p>增加对象的弱引用计数是通过调用 RefBase 类的成员变量 mRefs 的成员函数 incWeak 来实现的。RefBase类的成员变量 mRefs 的类型为 weakref_impl，它的成员函数 incWeak 是从父类 weakref_type 继承下来的，因此，它实际上是通过调用 weakref_type 类的成员函数 incWeak 来增加对象的弱引用计数的。如下所示：</p>
+<p>frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">void RefBase::weakref_type::incWeak(const void* id)
+{
+    /* this 指针指向的实际上是一个 weakref_impl 对象; */
+    weakref_impl* const impl = static_cast&lt;weakref_impl*&gt;(this);
+    impl-&gt;addWeakRef(id);
+    const int32_t c = android_atomic_inc(&amp;impl-&gt;mWeak); // 增加对象的弱引用计数;
+    LOG_ASSERT(c &gt;= 0, &quot;incWeak called on %p after last weak ref&quot;, this);
+}
+</code></pre>
+<p>Refbase类的成员变量 mRefs 是在构造函数中初始化的，如下所示：</p>
+<p>frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">RefBase::RefBase()
+    : mRefs(new weakref_impl(this))
+{
+//    LOGV(&quot;Creating refs %p with RefBase %p\n&quot;, mRefs, this);
+}
+</code></pre>
+<h3 id="sp类的析构函数">sp类的析构函数</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+sp&lt;T&gt;::~sp()
+{
+    /* m_ptr 所指向的对象是继承了 RefBase 类的，因此下面实际是调用了
+     * RefBase类的成员函数 decStrong 来减少对象的强引用计数;
+     */
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+}
+</code></pre>
+<p>文件路径: frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">void RefBase::decStrong(const void* id) const
+{
+    weakref_impl* const refs = mRefs;
+    refs-&gt;removeStrongRef(id);
+    const int32_t c = android_atomic_dec(&amp;refs-&gt;mStrong); //真正减少强引用计数的地方
+#if PRINT_REFS
+    LOGD(&quot;decStrong of %p from %p: cnt=%d\n&quot;, this, id, c);
+#endif
+    LOG_ASSERT(c &gt;= 1, &quot;decStrong() called on %p too many times&quot;, refs);
+    if (c == 1) {  // 强引用计数只剩下一个时，执行下面逻辑，会调用被引用用对象的onLastStrongRef方法
+        const_cast&lt;RefBase*&gt;(this)-&gt;onLastStrongRef(id);
+        if ((refs-&gt;mFlags&amp;OBJECT_LIFETIME_WEAK) != OBJECT_LIFETIME_WEAK) {
+            delete this; /* 释放对象所占用的内存，同时会导致RefBase类的析构函数被调用; */
+        }
+    }
+    refs-&gt;removeWeakRef(id);
+    refs-&gt;decWeak(id); //减少弱引用计数
+}
+
+RefBase::~RefBase()
+{
+//    LOGV(&quot;Destroying RefBase %p (refs %p)\n&quot;, this, mRefs);
+    if (mRefs-&gt;mWeak == 0) {
+        /* 如果对象的弱引用计数值为0，那么就把引用计数对象 mRefs 也一起释放; */
+//        LOGV(&quot;Freeing refs %p of old RefBase %p\n&quot;, mRefs, this);
+        delete mRefs;
+    }
+}
+
+void RefBase::weakref_type::decWeak(const void* id)
+{
+    weakref_impl* const impl = static_cast&lt;weakref_impl*&gt;(this);
+    impl-&gt;removeWeakRef(id); // 空函数,调试用;
+    const int32_t c = android_atomic_dec(&amp;impl-&gt;mWeak); // 减少对象的弱引用计数;
+    LOG_ASSERT(c &gt;= 1, &quot;decWeak called on %p too many times&quot;, this);
+    if (c != 1) return;
+    /* 如果 c 的值不等于 1，那么说明还有其他的弱指针在引用这个对象，则不再做处理，直接返回; */
+   
+    /* 走到这里，说明没有弱指针引用这个对象了，也没有强指针引用这个对象了。
+     * 基于对象的生命周期控制方式，确认该对象是否要释放掉;
+     */
+    if ((impl-&gt;mFlags&amp;OBJECT_LIFETIME_WEAK) != OBJECT_LIFETIME_WEAK) {
+        /* 生命周期只受强引用计数控制; */
+        if (impl-&gt;mStrong == INITIAL_STRONG_VALUE)
+            delete impl-&gt;mBase; /* 强引用计数为0，则释放; */
+        else {
+//            LOGV(&quot;Freeing refs %p of old RefBase %p\n&quot;, this, impl-&gt;mBase);
+            delete impl;
+        }
+    } else {
+        /* 生命周期受弱引用计数控制，先调用 onLastWeakRef 处理逻辑；  */
+        impl-&gt;mBase-&gt;onLastWeakRef(id);
+        if ((impl-&gt;mFlags&amp;OBJECT_LIFETIME_FOREVER) != OBJECT_LIFETIME_FOREVER) {
+            /* 如果生命周期控制不是 OBJECT_LIFETIME_FOREVER，则释放内存；*/
+            delete impl-&gt;mBase;
+        } /* 如果生命周期控制是 OBJECT_LIFETIME_FOREVER，即对象的生命周期完全不受强引用计数
+           * 和弱引用计数控制时，智能指针就退化成一个普通的 C++ 指针了，需要开发人员手动释放内存。
+           */
+    }
+}
+</code></pre>
+<h3 id="对象的生命周期控制方式小结">对象的生命周期控制方式小结</h3>
+<p>（1）如果一个对象的生命周期控制标志值被设置为0，那么只要它的强引用计数值为0，系统就会自动释放这个对象。</p>
+<p>（2）如果一个对象的生命周期控制标志值被设置为 OBJECT_LIFETIME_WEAK，那么只有当它的强引用计数值和弱引用计数值都为0时，系统才会自动释放这个对象。</p>
+<p>（3）如果一个对象的生命周期控制标志值被设置为 OBJECT_LIFETIME_FOREVER，那么系统就永远不会自动释放这个对象，它需要由开发人员来手动地释放。</p>
+<h2 id="322弱指针的实现原理分析">3.2.2,弱指针的实现原理分析</h2>
+<p>如果一个类的对象支持使用弱指针，那么这个类就必须要从 RefBase 类继承下来，因为 RefBase 类提供了弱引用计数器。</p>
+<h3 id="wp类的定义">wp类的定义</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">/* wp类是一个模板类，模板参数 T 表示对象的实际类型，它必须是从 RefBase 类继承下来的。 */
+template &lt;typename T&gt;
+class wp
+{
+public:
+    /* weakref_type 用来维护对象的弱引用计数; */
+    typedef typename RefBase::weakref_type weakref_type;
+   
+    /* m_ptr 用来指向它所引用的对象; */
+    inline wp() : m_ptr(0) { }
+
+    wp(T* other);
+    wp(const wp&lt;T&gt;&amp; other);
+    wp(const sp&lt;T&gt;&amp; other);
+    template&lt;typename U&gt; wp(U* other);
+    template&lt;typename U&gt; wp(const sp&lt;U&gt;&amp; other);
+    template&lt;typename U&gt; wp(const wp&lt;U&gt;&amp; other);
+
+    ~wp();
+   
+    // Assignment
+
+    wp&amp; operator = (T* other);
+    wp&amp; operator = (const wp&lt;T&gt;&amp; other);
+    wp&amp; operator = (const sp&lt;T&gt;&amp; other);
+   
+    template&lt;typename U&gt; wp&amp; operator = (U* other);
+    template&lt;typename U&gt; wp&amp; operator = (const wp&lt;U&gt;&amp; other);
+    template&lt;typename U&gt; wp&amp; operator = (const sp&lt;U&gt;&amp; other);
+   
+    void set_object_and_refs(T* other, weakref_type* refs);
+
+    // promotion to sp
+   
+    sp&lt;T&gt; promote() const;
+
+    // Reset
+   
+    void clear();
+
+    // Accessors
+   
+    inline  weakref_type* get_refs() const { return m_refs; }
+   
+    inline  T* unsafe_get() const { return m_ptr; }
+
+    // Operators
+
+    COMPARE_WEAK(==)
+    COMPARE_WEAK(!=)
+    COMPARE_WEAK(&gt;)
+    COMPARE_WEAK(&lt;)
+    COMPARE_WEAK(&lt;=)
+    COMPARE_WEAK(&gt;=)
+
+    inline bool operator == (const wp&lt;T&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) &amp;&amp; (m_refs == o.m_refs);
+    }
+    template&lt;typename U&gt;
+    inline bool operator == (const wp&lt;U&gt;&amp; o) const {
+        return m_ptr == o.m_ptr;
+    }
+
+    inline bool operator &gt; (const wp&lt;T&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) ? (m_refs &gt; o.m_refs) : (m_ptr &gt; o.m_ptr);
+    }
+    template&lt;typename U&gt;
+    inline bool operator &gt; (const wp&lt;U&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) ? (m_refs &gt; o.m_refs) : (m_ptr &gt; o.m_ptr);
+    }
+
+    inline bool operator &lt; (const wp&lt;T&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) ? (m_refs &lt; o.m_refs) : (m_ptr &lt; o.m_ptr);
+    }
+    template&lt;typename U&gt;
+    inline bool operator &lt; (const wp&lt;U&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) ? (m_refs &lt; o.m_refs) : (m_ptr &lt; o.m_ptr);
+    }
+                         inline bool operator != (const wp&lt;T&gt;&amp; o) const { return m_refs != o.m_refs; }
+    template&lt;typename U&gt; inline bool operator != (const wp&lt;U&gt;&amp; o) const { return !operator == (o); }
+                         inline bool operator &lt;= (const wp&lt;T&gt;&amp; o) const { return !operator &gt; (o); }
+    template&lt;typename U&gt; inline bool operator &lt;= (const wp&lt;U&gt;&amp; o) const { return !operator &gt; (o); }
+                         inline bool operator &gt;= (const wp&lt;T&gt;&amp; o) const { return !operator &lt; (o); }
+    template&lt;typename U&gt; inline bool operator &gt;= (const wp&lt;U&gt;&amp; o) const { return !operator &lt; (o); }
+
+private:
+    template&lt;typename Y&gt; friend class sp;
+    template&lt;typename Y&gt; friend class wp;
+
+    T*              m_ptr;
+    weakref_type*   m_refs;
+};
+</code></pre>
+<p>弱指针与强指针有一个很大的区别，就是弱指针不可以直接操作它所引用的对象，因为它所引用的对象可能是不受弱引用计数控制的，即它所引用的对象可能是一个无效的对象。因此，如果需要操作一个弱指针所引用的对象，那么就需要将这个弱指针升级为强指针，这是通过调用它的成员函数 promote 来实现的。如果升级成功，就说明该弱指针所引用的对象还没有被销毁，可以正常使用。</p>
+<h3 id="wp类的构造函数">wp类的构造函数</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+wp&lt;T&gt;::wp(T* other)
+    : m_ptr(other)
+{
+    // 实际调用 RefBase类的成员函数 createWeak 来增加对象的弱引用计数;
+    if (other) m_refs = other-&gt;createWeak(this);
+}
+</code></pre>
+<p>frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">RefBase::weakref_type* RefBase::createWeak(const void* id) const
+{
+    /* RefBase类的成员变量 mRefs 指向的是一个 weakref_impl 对象;
+     * incWeak 是增加实际引用对象的弱引用计数;
+     */
+    mRefs-&gt;incWeak(id);
+    return mRefs;
+}
+</code></pre>
+<h3 id="wp类的析构函数">wp类的析构函数</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+wp&lt;T&gt;::~wp()
+{
+    /* m_refs 指向一个 weakref_impl 对象，下面调用了 weakref_impl 类的 decWeak 来减少对象的弱引用计数; */
+    if (m_ptr) m_refs-&gt;decWeak(this);
+}
+</code></pre>
+<h3 id="wp类的成员函数promote弱指针升级为强指针">wp类的成员函数promote，弱指针升级为强指针</h3>
+<p>wp类没有重载*和-＞操作符号，所以不能直接操作它所引用的对象。</p>
+<p>promote函数实现：</p>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+sp&lt;T&gt; wp&lt;T&gt;::promote() const
+{
+    /* 弱指针升级为强指针的方式是通过内部的成员变量 m_prt 和 m_refs 来创建一个强指针; */
+    return sp&lt;T&gt;(m_ptr, m_refs);
+}
+
+template&lt;typename T&gt;
+sp&lt;T&gt;::sp(T* p, weakref_type* refs)
+    : m_ptr((p &amp;&amp; refs-&gt;attemptIncStrong(this)) ? p : 0)
+{
+    /* 参数 p 指向对象的地址，而参数 regs 指向对象内部的一个弱引用计数器对象;
+     * 只有在对象地址不为 NULL 的情况下，才会调用它内部的弱引用计数对象的成员函数 attemptIncStrong 来试图增加该对象的强引用计数;
+     * 如果能够成功增加对象的强引用计数，那么就可以成功地把一个弱指针升级为一个强指针了。
+     * 参数 refs 是一个类型为 weakref_type 的指针，即会调用 weakref_type 类的成员函数 attemptIncStrong;
+     */
+}
+</code></pre>
+<p>attemptIncStrong函数实现：</p>
+<p>文件路径：frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">/* attemptIncStrong 试图增加目标对象的强引用计数，但是可能会增加失败，因为目标对象
+ * 可能已经被释放了，或者该目标对象不允许使用强指针引用它。
+ */
+bool RefBase::weakref_type::attemptIncStrong(const void* id)
+{
+    incWeak(id); // 调用 incWeak 来增加对象的弱引用计数;
+   
+    /* 将 this 指针转换为一个 weakref_impl 指针，保存在 impl 中; */
+    weakref_impl* const impl = static_cast&lt;weakref_impl*&gt;(this);
+   
+    int32_t curCount = impl-&gt;mStrong;
+    LOG_ASSERT(curCount &gt;= 0, &quot;attemptIncStrong called on %p after underflow&quot;,
+               this);
+
+    /* 该对象正在被其他强指针所引用，即它的强引用计数值大于0，并且不等于 INITIAL_STRONG_VALUE; */
+    while (curCount &gt; 0 &amp;&amp; curCount != INITIAL_STRONG_VALUE) {
+        /* 直接将对象的强引用计数值增加1;
+         * android_atomic_cmpxchg 定义在 system/core/include/cutils/atomic.h 文件;
+         *  #define android_atomic_cmpxchg android_atomic_release_cas
+         *  int android_atomic_release_cas(int32_t oldvalue, int32_t newvalue, volatile int32_t* addr);
+         * =&gt; system/core/include/cutils/atomic-arm.h
+         *          extern inline int android_atomic_release_cas(int32_t old_value,
+         *                                   int32_t new_value,
+         *                                   volatile int32_t *ptr)
+         *           {
+         *                android_memory_barrier();
+         *                return android_atomic_cas(old_value, new_value, ptr);
+         *           }
+         *  android_atomic_cas 函数依据不同的CPU类型，执行不同的实现函数。
+         *
+         * android_atomic_release_cas 的工作原理：如果它发现地址 addr 的内容等于参数 oldvalue 的值，
+         * 那么它就会将地址 addr 的内容修改为 newvalue，然后给调用者返回 0，表示修改地址 addr 的内容成功；
+         * 否则，就什么也不做，然后给调用者返回 1 。
+         * 下面这一行，是增加对象的强引用计数，如果增加失败，则循环执行；
+         */
+        if (android_atomic_cmpxchg(curCount, curCount+1, &amp;impl-&gt;mStrong) == 0) {
+            break;
+        }
+        curCount = impl-&gt;mStrong;
+    }
+   
+    if (curCount &lt;= 0 || curCount == INITIAL_STRONG_VALUE) {
+        bool allow;
+        if (curCount == INITIAL_STRONG_VALUE) {
+            /* 对象的强引用计数值为 INITIAL_STRONG_VALUE，说明这个对象从来没有被强指针引用过;
+             * 下面根据对象的声明周期控制方式或者对象的实现来判断是否允许将一个引用了它的弱指针升级为强指针。
+             * 如果对象的生命周期只受强引用计数影响，那么就可以成功地将该弱指针升级为强指针；
+             *
+             */
+            // Attempting to acquire first strong reference...  this is allowed
+            // if the object does NOT have a longer lifetime (meaning the
+            // implementation doesn't need to see this), or if the implementation
+            // allows it to happen.
+            allow = (impl-&gt;mFlags&amp;OBJECT_LIFETIME_WEAK) != OBJECT_LIFETIME_WEAK
+                  || impl-&gt;mBase-&gt;onIncStrongAttempted(FIRST_INC_STRONG, id);
+        } else {
+            /*
+             * 如果对象的强引用计数值小于等于0，说明对象之前被强指针引用过，因此，就必须要保证对象的生命周期受到弱引用计数的影响；
+             * 否则，对象就已经被释放了。
+             * 如果对象的生命周期受弱引用计数影响，那么说明对象现在肯定是存在的；
+             * 需要调用 onIncStrongAttempted 确认对象是否允许强指针引用它;
+             * 如果 onIncStrongAttempted 返回 ture，就说明允许使用强指针来引用它，这种情况可以成功地将弱指针升级为强指针;
+             */
+            // Attempting to revive the object...  this is allowed
+            // if the object DOES have a longer lifetime (so we can safely
+            // call the object with only a weak ref) and the implementation
+            // allows it to happen.
+            allow = (impl-&gt;mFlags&amp;OBJECT_LIFETIME_WEAK) == OBJECT_LIFETIME_WEAK
+                  &amp;&amp; impl-&gt;mBase-&gt;onIncStrongAttempted(FIRST_INC_STRONG, id);            
+        }
+        if (!allow) {
+            /* 如果 allow 的值为 false，那就说明弱指针升级为强指针失败，于是
+             * 减少对象的弱引用计数，然后返回false;
+             */    
+            decWeak(id);
+            return false;
+        }
+
+        /* 运行到这里，说明 allow 为 true，即 弱指针升级为强指针成功；
+         * 下面增加对象的强引用计数;
+         */
+        curCount = android_atomic_inc(&amp;impl-&gt;mStrong);
+
+        // If the strong reference count has already been incremented by
+        // someone else, the implementor of onIncStrongAttempted() is holding
+        // an unneeded reference.  So call onLastStrongRef() here to remove it.
+        // (No, this is not pretty.)  Note that we MUST NOT do this if we
+        // are in fact acquiring the first reference.
+        if (curCount &gt; 0 &amp;&amp; curCount &lt; INITIAL_STRONG_VALUE) {
+            impl-&gt;mBase-&gt;onLastStrongRef(id);
+        }
+    }
+   
+    impl-&gt;addWeakRef(id);
+    impl-&gt;addStrongRef(id);
+
+#if PRINT_REFS
+    LOGD(&quot;attemptIncStrong of %p from %p: cnt=%d\n&quot;, this, id, curCount);
+#endif
+
+    if (curCount == INITIAL_STRONG_VALUE) {
+        android_atomic_add(-INITIAL_STRONG_VALUE, &amp;impl-&gt;mStrong);
+        impl-&gt;mBase-&gt;onFirstRef();
+    }
+   
+    return true;
+}
+
+bool RefBase::onIncStrongAttempted(uint32_t flags, const void* id)
+{
+    return (flags&amp;FIRST_INC_STRONG) ? true : false;
+}
+</code></pre>
+<h2 id="323应用实例分析">3.2.3,应用实例分析</h2>
+<p>我们在external目录下建立一个C++应用程序weightpointer来说明强指针和弱指针的使用方法，它的目录结构如下:</p>
+<pre><code class="language-shell">~/aosp
+----external
+    ----weightpointer
+        ----weightpointer.cpp
+        ----Android.mk
+</code></pre>
+<h3 id="weightpointercpp">weightpointer.cpp</h3>
+<p>文件路径: aosp/external/weightpointer/weightpointer.cpp</p>
+<pre><code class="language-C++">#include &lt;stdio.h&gt;
+#include &lt;utils/RefBase.h&gt;
+
+#define INITIAL_STRONG_VALUE (1&lt;&lt;28)
+
+using namespace android;
+
+class WeightClass : public RefBase
+{
+public:
+        void printRefCount() // 打印对象的引用计数，包括强引用计数和弱引用计数;
+        {
+                int32_t strong = getStrongCount();
+                weakref_type* ref = getWeakRefs();
+
+                printf(&quot;-----------------------\n&quot;);
+                printf(&quot;Strong Ref Count: %d.\n&quot;, (strong  == INITIAL_STRONG_VALUE ? 0 : strong));
+                printf(&quot;Weak Ref Count: %d.\n&quot;, ref-&gt;getWeakCount());
+                printf(&quot;-----------------------\n&quot;);
+        }
+};
+
+class StrongClass : public WeightClass
+{
+public:
+        StrongClass()
+        {
+                printf(&quot;Construct StrongClass Object.\n&quot;);
+        }
+
+        virtual ~StrongClass()
+        {
+                printf(&quot;Destory StrongClass Object.\n&quot;);
+        }
+};
+
+class WeakClass : public WeightClass
+{
+public:
+        WeakClass()
+        {
+                extendObjectLifetime(OBJECT_LIFETIME_WEAK); // 对象的生命周期同时受到强引用计数和弱引用计数的影响;
+                printf(&quot;Construct WeakClass Object.\n&quot;);
+        }
+
+        virtual ~WeakClass()
+        {
+                printf(&quot;Destory WeakClass Object.\n&quot;);
+        }
+};
+
+class ForeverClass : public WeightClass
+{
+public:
+        ForeverClass()
+        {
+                extendObjectLifetime(OBJECT_LIFETIME_FOREVER); // 对象的生命周期完全不受强引用计数和弱引用计数的影响;
+                printf(&quot;Construct ForeverClass Object.\n&quot;);
+        }
+
+        virtual ~ForeverClass()
+        {
+                printf(&quot;Destory ForeverClass Object.\n&quot;);
+        }
+};
+
+
+void TestStrongClass(StrongClass* pStrongClass)
+{
+        wp&lt;StrongClass&gt; wpOut = pStrongClass; // 将一个 StrongClass 对象赋值给一个弱指针 wpOut;
+        pStrongClass-&gt;printRefCount(); // 打印出该 StrongClass 对象的强引用计数值和弱引用计数值;（0和1）
+
+        {
+                sp&lt;StrongClass&gt; spInner = pStrongClass; // 将该 StrongClass对象赋值给一个强指针 spInner;
+                pStrongClass-&gt;printRefCount(); // 打印出该 StrongClass 对象的强引用计数值和弱引用计数值;（1和2）
+        }
+       
+        sp&lt;StrongClass&gt; spOut = wpOut.promote(); // spInner被析构,且由于对象 StrongClass 对象的生命周期只受强引用计数的影响，这里强引用计数为0，那么该StrongClass对象会自动被释放; 下面试图将弱指针 wpOut 升级为 强指针，但是由于弱指针 wpOut 所引用的 StrongClass 对象已经被释放，因此，弱指针 wpOut 升级为强指针就会失败;
+        printf(&quot;spOut: %p.\n&quot;, spOut.get());
+}
+
+void TestWeakClass(WeakClass* pWeakClass)
+{
+        wp&lt;WeakClass&gt; wpOut = pWeakClass; // 将一个 WeakClass 对象赋值给一个弱指针，因此该 WeakClass 对象的强引用计数值和弱引用计数值应该分别为0和1；
+        pWeakClass-&gt;printRefCount();
+
+        {
+                sp&lt;WeakClass&gt; spInner = pWeakClass; // 将该 WeakClass 对象赋值给一个强指针 spInner；
+                pWeakClass-&gt;printRefCount(); // 该 WeakClass 对象的强引用计数值和弱引用计数值分别为1和2;
+        }
+        // spInner被析构，该 WeakClass 对象的强引用计数值和弱引用计数值应该分别为0和1；由于该 WeakClass 对象的生命周期同时受强引用计数和弱引用计数的影响，因此，此时该 WeakClass 对象不会被释放。
+        pWeakClass-&gt;printRefCount();
+        sp&lt;WeakClass&gt; spOut = wpOut.promote(); // 试图将弱指针 wpOut 升级为 强指针，由于弱指针 wpOut 所引用的 WeakClass 对象还存在，因此，弱指针 wpOut 就能够成功升级为强指针 spOut;
+        printf(&quot;spOut: %p.\n&quot;, spOut.get()); // 该 WeakClass 对象的强引用计数值和弱引用计数值应该分别为1和2；
+}
+
+void TestForeverClass(ForeverClass* pForeverClass)
+{
+        wp&lt;ForeverClass&gt; wpOut = pForeverClass; // 将一个 ForeverClass 对象赋值给一个弱指针 wpOut，因此，该 ForeverClass 对象的强引用计数值和弱引用计数值分别为0和1;
+        pForeverClass-&gt;printRefCount();
+
+        {
+                sp&lt;ForeverClass&gt; spInner = pForeverClass; // 将该 ForeverClass 对象赋值给一个强指针 spInner；
+                pForeverClass-&gt;printRefCount(); // 该 ForeverClass 对象的强引用计数值和弱引用计数值分别为1和2;
+        }
+        // spInner被析构，该 ForeverClass 对象的强引用计数值和弱引用计数值应该分别为0和1；由于该 ForeverClass 对象的生命周期不受强引用计数和弱引用计数的影响，因此，此时该 ForeverClass 对象不会被释放。
+
+        // 当 TestForeverClass 函数返回，wpOut被析构，该 ForeverClass 对象的强引用计数值和弱引用计数值应该分别为0和0；由于该 ForeverClass 对象的生命周期不受强引用计数和弱引用计数的影响，因此，此时该 ForeverClass 对象不会被释放。
+}
+
+int main(int argc, char** argv)
+{
+        printf(&quot;Test Strong Class: \n&quot;);
+        StrongClass* pStrongClass = new StrongClass();
+        TestStrongClass(pStrongClass);
+
+        printf(&quot;\nTest Weak Class: \n&quot;);
+        WeakClass* pWeakClass = new WeakClass();
+        TestWeakClass(pWeakClass);
+
+        printf(&quot;\nTest Froever Class: \n&quot;);
+        ForeverClass* pForeverClass = new ForeverClass();
+        TestForeverClass(pForeverClass);
+        pForeverClass-&gt;printRefCount();
+        delete pForeverClass;
+
+        return 0;
+}
+</code></pre>
+<h3 id="androidmk-2">Android.mk</h3>
+<p>文件路径: aosp/external/weightpointer/Android.mk</p>
+<pre><code class="language-makefile">LOCAL_PATH := $(call my-dir)
+include $(CLEAR_VARS)
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE := weightpointer
+LOCAL_SRC_FILES := weightpointer.cpp
+LOCAL_SHARED_LIBRARIES :=  \
+    libcutils \
+    libutils
+include $(BUILD_EXECUTABLE)
+</code></pre>
+<p>Android.mk是应用程序 weightpointer 的编译脚本文件，它引用了 libcutils 和 libutils 两个库。</p>
+<h3 id="编译运行-2">编译&amp;运行</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./external/weightpointer
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1`
+target thumb C++: weightpointer &lt;= external/weightpointer/weightpointer.cpp
+target Executable: weightpointer (out/target/product/generic/obj/EXECUTABLES/weightpointer_intermediates/LINKED/weightpointer)
+target Non-prelinked: weightpointer (out/target/product/generic/symbols/system/bin/weightpointer)
+target Strip: weightpointer (out/target/product/generic/obj/EXECUTABLES/weightpointer_intermediates/weightpointer)
+Install: out/target/product/generic/system/bin/weightpointer
+make: Leaving directory `/home/dt/2.3.1_r1`
+
+dt@ubuntu:~/2.3.1_r1$ make snod
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+Install: out/host/linux-x86/bin/mkyaffs2image
+make snod: ignoring dependencies
+Target system fs image: out/target/product/generic/system.img
+
+dt@ubuntu:~/2.3.1_r1$ cp out/target/product/generic/system.img /mnt/hgfs/AndroidEmulator/images/system.img
+
+
+[win]&gt; pushd d:\AndroidEmulator
+[win]&gt; start /b emulator.exe -sysdir d:\AndroidEmulator -system images\system.img -data images\userdata.img -ramdisk images\ramdisk.img -kernel images\zImage -skindir d:\AndroidEmulator\skins -skin HVGA
+
+[win]&gt; adb shell
+# cd /system/bin
+# ./weightpointer
+Test Strong Class:
+Construct StrongClass Object.
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 1.
+-----------------------
+-----------------------
+Strong Ref Count: 1.
+Weak Ref Count: 2.
+-----------------------
+Destory StrongClass Object.
+spOut: 0x0.
+
+Test Weak Class:
+Construct WeakClass Object.
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 1.
+-----------------------
+-----------------------
+Strong Ref Count: 1.
+Weak Ref Count: 2.
+-----------------------
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 1.
+-----------------------
+spOut: 0xa528.
+Destory WeakClass Object.
+
+Test Froever Class:
+Construct ForeverClass Object.
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 1.
+-----------------------
+-----------------------
+Strong Ref Count: 1.
+Weak Ref Count: 2.
+-----------------------
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 0.
+-----------------------
+Destory ForeverClass Object.
+#
+</code></pre>
+<h1 id="找找android源码中使用智能指针的场景">找找Android源码中使用智能指针的场景</h1>
+<p>在 Android15.0.0_r1 中搜索 onFirstRef 关键字，然后粗略定位哪些模块使用了智能指针：</p>
+<pre><code class="language-shell">/frameworks/av/services/audiopolicy/service/AudioRecordClient.cpp
+/frameworks/native/services/sensorservice/SensorDeviceUtils.cpp
+/hardware/interfaces/broadcastradio/1.0/default/BroadcastRadio.cpp
+/system/libhwbinder/BpHwBinder.cpp
+/frameworks/av/services/audioflinger/PatchCommandThread.cpp
+/frameworks/av/services/audioflinger/DeviceEffectManager.cpp
+/hardware/interfaces/soundtrigger/2.0/default/SoundTriggerHalImpl.cpp
+/hardware/interfaces/soundtrigger/2.2/default/SoundTriggerHw.cpp
+/hardware/interfaces/soundtrigger/2.3/default/SoundTriggerHw.cpp
+/frameworks/av/media/libaudiohal/impl/DevicesFactoryHalHidl.cpp
+/frameworks/native/services/sensorservice/SensorDirectConnection.cpp
+/frameworks/base/core/jni/android_hardware_SensorManager.cpp
+/frameworks/native/libs/binder/BpBinder.cpp
+/frameworks/av/services/audioflinger/MelReporter.cpp
+/frameworks/native/services/sensorservice/SensorEventConnection.cpp
+/frameworks/av/services/audiopolicy/service/Spatializer.cpp
+/frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp
+/system/libhidl/transport/ServiceManagement.cpp
+/frameworks/base/cmds/bootanimation/BootAnimation.cpp
+/frameworks/native/libs/gui/SurfaceComposerClient.cpp
+/frameworks/av/media/libaudioclient/AudioTrack.cpp
+</code></pre>
+<p>从上面过滤的文件可以看出，开机动画 bootanimation 模块，使用了智能指针；然后就是传感器 sensor 模块，应该也使用了，还有就是音频模块。</p>
+
+              </div>
+              <div class="toc-container">
+                <ul class="markdownIt-TOC">
+<li><a href="#%E7%AC%AC3%E7%AB%A0%E6%99%BA%E8%83%BD%E6%8C%87%E9%92%88">第3章，智能指针</a></li>
+<li><a href="#31%E8%BD%BB%E9%87%8F%E7%BA%A7%E6%8C%87%E9%92%88">3.1，轻量级指针</a>
+<ul>
+<li><a href="#311%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86%E5%88%86%E6%9E%90">3.1.1.实现原理分析</a>
+<ul>
+<li><a href="#refbaseh">RefBase.h</a></li>
+</ul>
+</li>
+<li><a href="#312%E5%BA%94%E7%94%A8%E5%AE%9E%E4%BE%8B%E5%88%86%E6%9E%90">3.1.2.应用实例分析</a>
+<ul>
+<li><a href="#lightpointercpp">lightpointer.cpp</a></li>
+<li><a href="#androidmk">Android.mk</a></li>
+<li><a href="#%E7%BC%96%E8%AF%91%E8%BF%90%E8%A1%8C">编译&amp;运行</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a href="#32%E5%BC%BA%E6%8C%87%E9%92%88%E5%92%8C%E5%BC%B1%E6%8C%87%E9%92%88">3.2.强指针和弱指针</a>
+<ul>
+<li><a href="#321%E5%BC%BA%E6%8C%87%E9%92%88%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86%E5%88%86%E6%9E%90">3.2.1,强指针的实现原理分析</a>
+<ul>
+<li><a href="#refbase%E7%B1%BB">RefBase类</a></li>
+<li><a href="#weakref_impl%E7%B1%BB">weakref_impl类</a></li>
+<li><a href="#sp%E7%B1%BB%E7%9A%84%E6%9E%84%E9%80%A0%E5%87%BD%E6%95%B0">sp类的构造函数</a></li>
+<li><a href="#sp%E7%B1%BB%E7%9A%84%E6%9E%90%E6%9E%84%E5%87%BD%E6%95%B0">sp类的析构函数</a></li>
+<li><a href="#%E5%AF%B9%E8%B1%A1%E7%9A%84%E7%94%9F%E5%91%BD%E5%91%A8%E6%9C%9F%E6%8E%A7%E5%88%B6%E6%96%B9%E5%BC%8F%E5%B0%8F%E7%BB%93">对象的生命周期控制方式小结</a></li>
+</ul>
+</li>
+<li><a href="#322%E5%BC%B1%E6%8C%87%E9%92%88%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86%E5%88%86%E6%9E%90">3.2.2,弱指针的实现原理分析</a>
+<ul>
+<li><a href="#wp%E7%B1%BB%E7%9A%84%E5%AE%9A%E4%B9%89">wp类的定义</a></li>
+<li><a href="#wp%E7%B1%BB%E7%9A%84%E6%9E%84%E9%80%A0%E5%87%BD%E6%95%B0">wp类的构造函数</a></li>
+<li><a href="#wp%E7%B1%BB%E7%9A%84%E6%9E%90%E6%9E%84%E5%87%BD%E6%95%B0">wp类的析构函数</a></li>
+<li><a href="#wp%E7%B1%BB%E7%9A%84%E6%88%90%E5%91%98%E5%87%BD%E6%95%B0promote%E5%BC%B1%E6%8C%87%E9%92%88%E5%8D%87%E7%BA%A7%E4%B8%BA%E5%BC%BA%E6%8C%87%E9%92%88">wp类的成员函数promote，弱指针升级为强指针</a></li>
+</ul>
+</li>
+<li><a href="#323%E5%BA%94%E7%94%A8%E5%AE%9E%E4%BE%8B%E5%88%86%E6%9E%90">3.2.3,应用实例分析</a>
+<ul>
+<li><a href="#weightpointercpp">weightpointer.cpp</a></li>
+<li><a href="#androidmk-2">Android.mk</a></li>
+<li><a href="#%E7%BC%96%E8%AF%91%E8%BF%90%E8%A1%8C-2">编译&amp;运行</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a href="#%E6%89%BE%E6%89%BEandroid%E6%BA%90%E7%A0%81%E4%B8%AD%E4%BD%BF%E7%94%A8%E6%99%BA%E8%83%BD%E6%8C%87%E9%92%88%E7%9A%84%E5%9C%BA%E6%99%AF">找找Android源码中使用智能指针的场景</a></li>
+</ul>
+
+              </div>
+            </div>
+          </article>
+        </div>
+
+        
+          <div class="next-post">
+            <div class="next">下一篇</div>
+            <a href="https://pinggle.github.io/post/shi-yan-3_app_25_-kai-fa-android-ying-yong-cheng-xu-lai-shi-yong-ying-jian-fang-wen-fu-wu/">
+              <h3 class="post-title">
+                [实验3_app]_[2.5_开发Android应用程序来使用硬件访问服务]
+              </h3>
+            </a>
+          </div>
+        
+
+        
+
+        <div class="site-footer">
+  Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a>
+  <a class="rss" href="https://pinggle.github.io/atom.xml" target="_blank">
+    <i class="ri-rss-line"></i> RSS
+  </a>
+</div>
+
+      </div>
+    </div>
+
+    <script>
+      hljs.initHighlightingOnLoad()
+
+      let mainNavLinks = document.querySelectorAll(".markdownIt-TOC a");
+
+      // This should probably be throttled.
+      // Especially because it triggers during smooth scrolling.
+      // https://lodash.com/docs/4.17.10#throttle
+      // You could do like...
+      // window.addEventListener("scroll", () => {
+      //    _.throttle(doThatStuff, 100);
+      // });
+      // Only not doing it here to keep this Pen dependency-free.
+
+      window.addEventListener("scroll", event => {
+        let fromTop = window.scrollY;
+
+        mainNavLinks.forEach((link, index) => {
+          let section = document.getElementById(decodeURI(link.hash).substring(1));
+          let nextSection = null
+          if (mainNavLinks[index + 1]) {
+            nextSection = document.getElementById(decodeURI(mainNavLinks[index + 1].hash).substring(1));
+          }
+          if (section.offsetTop <= fromTop) {
+            if (nextSection) {
+              if (nextSection.offsetTop > fromTop) {
+                link.classList.add("current");
+              } else {
+                link.classList.remove("current");    
+              }
+            } else {
+              link.classList.add("current");
+            }
+          } else {
+            link.classList.remove("current");
+          }
+        });
+      });
+
+    </script>
+  </body>
+</html>

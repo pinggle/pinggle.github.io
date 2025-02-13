@@ -1,0 +1,3793 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+    <id>https://pinggle.github.io</id>
+    <title>pinggle的博客</title>
+    <updated>2025-02-13T04:39:07.945Z</updated>
+    <generator>https://github.com/jpmonette/feed</generator>
+    <link rel="alternate" href="https://pinggle.github.io"/>
+    <link rel="self" href="https://pinggle.github.io/atom.xml"/>
+    <subtitle>专注，耐心，持之以恒
+禁忌: 急躁,贪心</subtitle>
+    <logo>https://pinggle.github.io/images/avatar.png</logo>
+    <icon>https://pinggle.github.io/favicon.ico</icon>
+    <rights>All rights reserved 2025, pinggle的博客</rights>
+    <entry>
+        <title type="html"><![CDATA[[实验4_C++指针]_[3_C++智能指针]]]></title>
+        <id>https://pinggle.github.io/post/shi-yan-4_-qiang-ruo-zhi-zhen-xue-xi-_android-xi-tong-yuan-dai-ma-qing-jing-fen-xi-_3_czhi-neng-zhi-zhen/</id>
+        <link href="https://pinggle.github.io/post/shi-yan-4_-qiang-ruo-zhi-zhen-xue-xi-_android-xi-tong-yuan-dai-ma-qing-jing-fen-xi-_3_czhi-neng-zhi-zhen/">
+        </link>
+        <updated>2025-02-13T04:01:29.000Z</updated>
+        <content type="html"><![CDATA[<h1 id="第3章智能指针">第3章，智能指针</h1>
+<p>问：为什么需要使用智能指针？</p>
+<p>答：主要是为了解决使用C++时，忘记释放指针指向的对象所占用的内存，或者使用了无效指针，造成内存泄漏，甚至系统崩溃。</p>
+<p>问：为什么Android系统的应用程序框架层还要使用C++语言呢？</p>
+<p>答：C++语言编译出的程序性能较Java语言高。</p>
+<p>问：智能指针的基本原理是什么？</p>
+<p>答：智能指针是一种能够自动维护对象引用计数的技术，智能指针是一个对象，而不是一个指针，但是它引用了一个实际使用的对象。智能指针能够自动地维护实际对象的引用计数，在智能指针构造时，增加它所引用的对象的引用计数；在智能指针析构时，减少它所引用的对象的引用计数。由于智能指针的构造和析构都是自动的，因此，它就很自然地实现了自动的对象引用计数技术。</p>
+<p>问：为什么需要引入强引用计数和弱引用计数？</p>
+<p>答：为了解决对象之前互相引用，导致对象无法被释放的问题。</p>
+<h1 id="31轻量级指针">3.1，轻量级指针</h1>
+<p>轻量级指针通过简单的引用计数技术来维护对象的声明周期。如果一个类的对象支持使用轻量级指针，那么它就必须要从 LightRefBase 类继承下来，因为 LightRefBase 类提供了一个简单的引用计数器。</p>
+<h2 id="311实现原理分析">3.1.1.实现原理分析</h2>
+<h3 id="refbaseh">RefBase.h</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<p>备注：这里仅仅列出 轻量级指针 涉及的代码，源文件不止这么多代码。</p>
+<pre><code class="language-c++">/* LightRefBase 类是一个模板类，其中，模板参数 T 表示对象的实际类型。*/
+template &lt;class T&gt;
+class LightRefBase
+{
+public:
+    /* 成员变量 mCount，用来描述一个对象的引用计数值。 */
+    inline LightRefBase() : mCount(0) { }
+    /* incStrong 增加它所引用的对象的引用计数; */
+    inline void incStrong(const void* id) const {
+        android_atomic_inc(&amp;mCount);
+    }
+    /* decStrong 减少它所引用的对象的引用计数; */
+    inline void decStrong(const void* id) const {
+        if (android_atomic_dec(&amp;mCount) == 1) {
+            delete static_cast&lt;const T*&gt;(this);
+            /* 如果对象的引用计数值在减少之后变成0，那么表示需要释放这个对象所占用的内存了。 */
+        }
+    }
+    //! DEBUGGING ONLY: Get current strong ref count.
+    inline int32_t getStrongCount() const {
+        return mCount;
+    }
+   
+protected:
+    inline ~LightRefBase() { }
+   
+private:
+    mutable volatile int32_t mCount;
+};
+
+// ---------------------------------------------------------------------------
+
+/* 轻量级指针的实现类为sp，它同时也是强指针的实现类;
+ * sp 类是一个模板类，其中，模板参数 T 表示对象的实际类型。
+ */
+template &lt;typename T&gt;
+class sp
+{
+public:
+    /* 使用 RefBase::weakref_type 类来维护它所引用的对象的强引用计数和弱引用计数; */
+    typedef typename RefBase::weakref_type weakref_type;
+   
+    /* 成员变量 m_ptr 是一个指针，指向实际引用的对象。 */
+    inline sp() : m_ptr(0) { }
+
+    sp(T* other);
+    sp(const sp&lt;T&gt;&amp; other);
+    template&lt;typename U&gt; sp(U* other);
+    template&lt;typename U&gt; sp(const sp&lt;U&gt;&amp; other);
+
+    ~sp();
+   
+    // Assignment
+
+    sp&amp; operator = (T* other);
+    sp&amp; operator = (const sp&lt;T&gt;&amp; other);
+   
+    template&lt;typename U&gt; sp&amp; operator = (const sp&lt;U&gt;&amp; other);
+    template&lt;typename U&gt; sp&amp; operator = (U* other);
+   
+    //! Special optimization for use by ProcessState (and nobody else).
+    void force_set(T* other);
+   
+    // Reset
+   
+    void clear();
+   
+    // Accessors
+
+    inline  T&amp;      operator* () const  { return *m_ptr; }
+    inline  T*      operator-&gt; () const { return m_ptr;  }
+    inline  T*      get() const         { return m_ptr; }
+
+    // Operators
+       
+    COMPARE(==)
+    COMPARE(!=)
+    COMPARE(&gt;)
+    COMPARE(&lt;)
+    COMPARE(&lt;=)
+    COMPARE(&gt;=)
+
+private:    
+    template&lt;typename Y&gt; friend class sp;
+    template&lt;typename Y&gt; friend class wp;
+
+    // Optimization for wp::promote().
+    sp(T* p, weakref_type* refs);
+   
+    T*              m_ptr;
+};
+
+/* sp类的构造函数，首先初始化 m_ptr，然后调用 m_ptr 的成员函数 incStrong 来增加它的引用计数。*/
+template&lt;typename T&gt;
+sp&lt;T&gt;::sp(T* other)
+    : m_ptr(other)
+{
+    if (other) other-&gt;incStrong(this);
+}
+
+template&lt;typename T&gt;
+sp&lt;T&gt;::sp(const sp&lt;T&gt;&amp; other)
+    : m_ptr(other.m_ptr)
+{
+    if (m_ptr) m_ptr-&gt;incStrong(this);
+}
+
+template&lt;typename T&gt; template&lt;typename U&gt;
+sp&lt;T&gt;::sp(U* other) : m_ptr(other)
+{
+    if (other) other-&gt;incStrong(this);
+}
+
+template&lt;typename T&gt; template&lt;typename U&gt;
+sp&lt;T&gt;::sp(const sp&lt;U&gt;&amp; other)
+    : m_ptr(other.m_ptr)
+{
+    if (m_ptr) m_ptr-&gt;incStrong(this);
+}
+
+/* sp类的析构函数，调用成员变量 m_ptr 的成员函数 decStrong 减少对象的引用计数。 */
+template&lt;typename T&gt;
+sp&lt;T&gt;::~sp()
+{
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+}
+
+template&lt;typename T&gt;
+sp&lt;T&gt;&amp; sp&lt;T&gt;::operator = (const sp&lt;T&gt;&amp; other) {
+    T* otherPtr(other.m_ptr);
+    if (otherPtr) otherPtr-&gt;incStrong(this);
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+    m_ptr = otherPtr;
+    return *this;
+}
+
+template&lt;typename T&gt;
+sp&lt;T&gt;&amp; sp&lt;T&gt;::operator = (T* other)
+{
+    if (other) other-&gt;incStrong(this);
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+    m_ptr = other;
+    return *this;
+}
+
+template&lt;typename T&gt; template&lt;typename U&gt;
+sp&lt;T&gt;&amp; sp&lt;T&gt;::operator = (const sp&lt;U&gt;&amp; other)
+{
+    U* otherPtr(other.m_ptr);
+    if (otherPtr) otherPtr-&gt;incStrong(this);
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+    m_ptr = otherPtr;
+    return *this;
+}
+
+template&lt;typename T&gt; template&lt;typename U&gt;
+sp&lt;T&gt;&amp; sp&lt;T&gt;::operator = (U* other)
+{
+    if (other) other-&gt;incStrong(this);
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+    m_ptr = other;
+    return *this;
+}
+</code></pre>
+<h2 id="312应用实例分析">3.1.2.应用实例分析</h2>
+<p>我们在 aosp/external 目录中建立一个 C++ 应用程序 lightpointer 来说明轻量级指针的使用方法，它的目录结构如下：</p>
+<pre><code class="language-shell">~/aosp
+----external
+    ----lightpointer
+        ----lightpointer.cpp
+        ----Android.mk
+</code></pre>
+<h3 id="lightpointercpp">lightpointer.cpp</h3>
+<p>文件路径：aosp/external/lightpointer/lightpointer.cpp</p>
+<pre><code class="language-C++">#include &lt;stdio.h&gt;
+#include &lt;utils/RefBase.h&gt;
+     
+using  namespace android;
+
+/* LightClass 继承了 LightRefBase类 */
+class LightClass : public LightRefBase&lt;LightClass&gt;
+{
+public:
+    LightClass()
+    {
+        printf(&quot;Construct LightClass Object.\n&quot;);
+    }
+
+    virtual ~LightClass()
+    {
+        printf(&quot;Destory LightClass Object.\n&quot;);
+    }
+};
+
+int main(int argc, char** argv)
+{
+    LightClass* pLightClass = new LightClass();
+    /* 创建轻量级指针 lpOut 引用 LightRefBase */
+    sp&lt;LightClass&gt; lpOut = pLightClass;
+
+    /* 经过构造函数的调用，引用计数值为1; */
+    printf(&quot;Light Ref Count: %d.\n&quot;, pLightClass-&gt;getStrongCount());
+
+    {
+        /* 新建一个轻量级指针 lpInner 来引用 loOut 对象，引用计数增加1; */
+        sp&lt;LightClass&gt; lpInner = lpOut;
+
+        /* 经过构造函数和lpInner的指向，计数器为2; */
+        printf(&quot;Light Ref Count: %d.\n&quot;, pLightClass-&gt;getStrongCount());
+    } // 当走出括号，lpInner 被析构，引用计数减少1;
+
+    /* 经过构造函数和lpInner的指向，然后lpInner被析构，计数器为1; */
+    printf(&quot;Light Ref Count: %d.\n&quot;, pLightClass-&gt;getStrongCount());
+
+    return 0;
+}
+</code></pre>
+<h3 id="androidmk">Android.mk</h3>
+<p>文件路径：aosp/external/lightpointer/Android.mk</p>
+<pre><code class="language-makefile">LOCAL_PATH := $(call my-dir)
+include $(CLEAR_VARS)
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE := lightpointer
+LOCAL_SRC_FILES := lightpointer.cpp
+LOCAL_SHARED_LIBRARIES := \
+    libcutils \
+    libutils
+include $(BUILD_EXECUTABLE)
+</code></pre>
+<p>这是应用程序 lightpointer 的编译脚本文件，它引用了 libcutils 和 libutils 两个库。</p>
+<h3 id="编译运行">编译&amp;运行</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ mmm ./external/lightpointer/
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1'
+target thumb C++: lightpointer &lt;= external/lightpointer/lightpointer.cpp
+target Executable: lightpointer (out/target/product/generic/obj/EXECUTABLES/lightpointer_intermediates/LINKED/lightpointer)
+target Non-prelinked: lightpointer (out/target/product/generic/symbols/system/bin/lightpointer)
+target Strip: lightpointer (out/target/product/generic/obj/EXECUTABLES/lightpointer_intermediates/lightpointer)
+Install: out/target/product/generic/system/bin/lightpointer
+make: Leaving directory `/home/dt/2.3.1_r1'
+
+dt@ubuntu:~/2.3.1_r1$ make snod
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+Install: out/host/linux-x86/bin/mkyaffs2image
+make snod: ignoring dependencies
+Target system fs image: out/target/product/generic/system.img
+
+dt@ubuntu:~/goldfish$ cp out/target/product/generic/system.img /mnt/hgfs/AndroidEmulator/images/system.img
+
+[win]&gt; pushd d:\AndroidEmulator
+[win]&gt; start /b emulator.exe -sysdir d:\AndroidEmulator -system images\system.img -data images\userdata.img -ramdisk images\ramdisk.img -kernel images\zImage -skindir d:\AndroidEmulator\skins -skin HVGA
+
+[win]&gt; adb shell
+# cd /system/bin
+# ./lightpointer
+Construct LightClass Object.
+Light Ref Count: 1.
+Light Ref Count: 2.
+Light Ref Count: 1.
+Destory LightClass Object.
+# 
+</code></pre>
+<h1 id="32强指针和弱指针">3.2.强指针和弱指针</h1>
+<p>强指针和弱指针通过强引用计数和弱引用计数来维护对象的声明周期。如果一个类的对象要支持使用强指针和弱指针，那么它就必须从 RefBase 类继承下来，因为 Refbase 类提供了强引用计数器和弱引用计数器。</p>
+<h2 id="321强指针的实现原理分析">3.2.1,强指针的实现原理分析</h2>
+<h3 id="refbase类">RefBase类</h3>
+<p>文件路径: frameworks/base/include/utils/RefBase.h</p>
+<p>备注：这里仅仅列出 轻量级指针 涉及的代码，源文件不止这么多代码。</p>
+<pre><code class="language-C++">class RefBase
+{
+public:
+    void            incStrong(const void* id) const;
+    void            decStrong(const void* id) const;
+
+    void            forceIncStrong(const void* id) const;
+
+    //! DEBUGGING ONLY: Get current strong ref count.
+    int32_t         getStrongCount() const;
+
+    class weakref_type
+    {
+    public:
+        RefBase*            refBase() const;
+       
+        void                incWeak(const void* id);
+        void                decWeak(const void* id);
+       
+        bool                attemptIncStrong(const void* id);
+       
+        //! This is only safe if you have set OBJECT_LIFETIME_FOREVER.
+        bool                attemptIncWeak(const void* id);
+
+        //! DEBUGGING ONLY: Get current weak ref count.
+        int32_t             getWeakCount() const;
+
+        //! DEBUGGING ONLY: Print references held on object.
+        void                printRefs() const;
+
+        //! DEBUGGING ONLY: Enable tracking for this object.
+        // enable -- enable/disable tracking
+        // retain -- when tracking is enable, if true, then we save a stack trace
+        //           for each reference and dereference; when retain == false, we
+        //           match up references and dereferences and keep only the
+        //           outstanding ones.
+       
+        void                trackMe(bool enable, bool retain);
+    };
+   
+            weakref_type*   createWeak(const void* id) const;
+           
+            weakref_type*   getWeakRefs() const;
+
+            //! DEBUGGING ONLY: Print references held on object.
+    inline  void            printRefs() const { getWeakRefs()-&gt;printRefs(); }
+
+            //! DEBUGGING ONLY: Enable tracking of object.
+    inline  void            trackMe(bool enable, bool retain)
+    {
+        getWeakRefs()-&gt;trackMe(enable, retain);
+    }
+
+protected:
+                            RefBase();
+    virtual                 ~RefBase();
+   
+    //! Flags for extendObjectLifetime()
+    enum {
+        OBJECT_LIFETIME_WEAK    = 0x0001,
+        OBJECT_LIFETIME_FOREVER = 0x0003
+    };
+   
+            void            extendObjectLifetime(int32_t mode);
+           
+    //! Flags for onIncStrongAttempted()
+    enum {
+        FIRST_INC_STRONG = 0x0001
+    };
+   
+    virtual void            onFirstRef();
+    virtual void            onLastStrongRef(const void* id);
+    virtual bool            onIncStrongAttempted(uint32_t flags, const void* id);
+    virtual void            onLastWeakRef(const void* id);
+
+private:
+    friend class weakref_type;
+    class weakref_impl;
+   
+    RefBase(const RefBase&amp; o);
+    RefBase&amp;        operator=(const RefBase&amp; o);
+
+    /* 使用一个 weakref_impl 类型的成员变量 mRefs 来描述对象的引用计数; */
+    weakref_impl* const mRefs;
+};
+</code></pre>
+<p>与 LightRefBase 类一样，RefBase 类也提供了成员函数 incStrong 和 decStrong 来维护它所引用的对象的引用计数。不过，RefBase 类与 LightRefBase 类不一样，它不是直接使用一个整数来维护对象的引用计数的，而是使用一个 weakref_impl 对象，即成员变量 mRefs 来描述对象的引用计数。</p>
+<p>weakref_impl 类同时为对象提供了强引用计数和弱引用计数。</p>
+<h3 id="weakref_impl类">weakref_impl类</h3>
+<p>文件路径: frameworks/base/libs/utils/RefBase.cpp</p>
+<p>备注：这里仅仅列出 轻量级指针 涉及的代码，源文件不止这么多代码。</p>
+<pre><code class="language-C++">/* weakref_impl 类继承了 weakref_type 类*/
+class RefBase::weakref_impl : public RefBase::weakref_type
+{
+public:
+    volatile int32_t    mStrong;
+    volatile int32_t    mWeak;
+    RefBase* const      mBase;
+    volatile int32_t    mFlags;
+
+
+#if !DEBUG_REFS
+
+    weakref_impl(RefBase* base)
+        : mStrong(INITIAL_STRONG_VALUE)
+        , mWeak(0)
+        , mBase(base)
+        , mFlags(0)
+    {
+    }
+
+    void addStrongRef(const void* /*id*/) { }
+    void removeStrongRef(const void* /*id*/) { }
+    void addWeakRef(const void* /*id*/) { }
+    void removeWeakRef(const void* /*id*/) { }
+    void printRefs() const { }
+    void trackMe(bool, bool) { }
+
+#else
+    ......
+#endif
+};
+</code></pre>
+<p>weakref_impl 类继承了 weakref_type 类。weakref_type 类定义在 RefBase 类的内部，它提供了成员函数 incWeak、decWeak、attemptIncStrong 和 attemptIncWeak 来维护对象的强引用计数和弱引用计数。weakref_type 类只定义了引用计数维护接口（操作函数），具体的实现（操作对象）是由 weakref_impl 类提供的。</p>
+<p>weakref_impl 类有两个成员变量 mStrong 和 mWeak 分别用来描述对象的强引用计数和弱引用计数。同时，weakref_impl 类的成员变量 mBase 指向了它所引用的对象的地址，而成员变量 mFlags 是一个标志值，用来描述对象的生命周期控制方式。weakref_impl 类的成员变量 mFlags 的取值范围为 0、OBJECT_LIFE_TIME_WEAK 或者 OBJECT_LIFETIME_FOREVER，其中，0 表示对象的声明周期只受强引用计数影响；OBJECT_LIFETIME_WEAK 表示对象的声明周期同时受强引用计数和弱引用计数影响；OBJECT_LIFETIME_FOREVER 表示对象的声明周期完全不受强引用计数或者弱引用计数影响。</p>
+<h3 id="sp类的构造函数">sp类的构造函数</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+sp&lt;T&gt;::sp(T* other)
+    : m_ptr(other)
+{
+    if (other) other-&gt;incStrong(this);
+}
+</code></pre>
+<p>模块参数 T 是一个继承了 RefBase 类的子类，因此，第5行实际上是调用了 RefBase 类的成员函数 incStrong 来增加对象的强引用计数，如下所示：</p>
+<p>frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">#define INITIAL_STRONG_VALUE (1&lt;&lt;28)
+
+void RefBase::incStrong(const void* id) const
+{
+    weakref_impl* const refs = mRefs;
+    refs-&gt;addWeakRef(id);
+    refs-&gt;incWeak(id); // 增加对象的弱引用计数;
+    refs-&gt;addStrongRef(id);
+
+    const int32_t c = android_atomic_inc(&amp;refs-&gt;mStrong); // 增加对象的强引用计数;
+    LOG_ASSERT(c &gt; 0, &quot;incStrong() called on %p after last strong ref&quot;, refs);
+#if PRINT_REFS
+    LOGD(&quot;incStrong of %p from %p: cnt=%d\n&quot;, this, id, c);
+#endif
+    /* 若 c != INITIAL_STRONG_VALUE 说明该对象不是第一次被引用，INITIAL_STRONG_VALUE是mStrong的初值; */
+    if (c != INITIAL_STRONG_VALUE)  {
+        /* 不是第一次被引用，直接退出函数; */
+        return;
+    }
+
+    /* 下面的逻辑：是第一次被引用，会调用onFirstRef接口; */
+
+    android_atomic_add(-INITIAL_STRONG_VALUE, &amp;refs-&gt;mStrong);
+    /*  如果发现对象是第一次被强指针引用，则调用对象的成员函数 onFristRef 来通知对象，
+     *  它被强指针引用了，以便它可以执行一些业务相关逻辑;
+     *  RefBase类的成员函数 onFristRef 是一个空实现，如果子类想要处理这个事件，
+     *  那么就必须要重写成员函数 onFristRef 。
+     */
+    const_cast&lt;RefBase*&gt;(this)-&gt;onFirstRef();
+}
+</code></pre>
+<p>增加对象的弱引用计数是通过调用 RefBase 类的成员变量 mRefs 的成员函数 incWeak 来实现的。RefBase类的成员变量 mRefs 的类型为 weakref_impl，它的成员函数 incWeak 是从父类 weakref_type 继承下来的，因此，它实际上是通过调用 weakref_type 类的成员函数 incWeak 来增加对象的弱引用计数的。如下所示：</p>
+<p>frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">void RefBase::weakref_type::incWeak(const void* id)
+{
+    /* this 指针指向的实际上是一个 weakref_impl 对象; */
+    weakref_impl* const impl = static_cast&lt;weakref_impl*&gt;(this);
+    impl-&gt;addWeakRef(id);
+    const int32_t c = android_atomic_inc(&amp;impl-&gt;mWeak); // 增加对象的弱引用计数;
+    LOG_ASSERT(c &gt;= 0, &quot;incWeak called on %p after last weak ref&quot;, this);
+}
+</code></pre>
+<p>Refbase类的成员变量 mRefs 是在构造函数中初始化的，如下所示：</p>
+<p>frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">RefBase::RefBase()
+    : mRefs(new weakref_impl(this))
+{
+//    LOGV(&quot;Creating refs %p with RefBase %p\n&quot;, mRefs, this);
+}
+</code></pre>
+<h3 id="sp类的析构函数">sp类的析构函数</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+sp&lt;T&gt;::~sp()
+{
+    /* m_ptr 所指向的对象是继承了 RefBase 类的，因此下面实际是调用了
+     * RefBase类的成员函数 decStrong 来减少对象的强引用计数;
+     */
+    if (m_ptr) m_ptr-&gt;decStrong(this);
+}
+</code></pre>
+<p>文件路径: frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">void RefBase::decStrong(const void* id) const
+{
+    weakref_impl* const refs = mRefs;
+    refs-&gt;removeStrongRef(id);
+    const int32_t c = android_atomic_dec(&amp;refs-&gt;mStrong); //真正减少强引用计数的地方
+#if PRINT_REFS
+    LOGD(&quot;decStrong of %p from %p: cnt=%d\n&quot;, this, id, c);
+#endif
+    LOG_ASSERT(c &gt;= 1, &quot;decStrong() called on %p too many times&quot;, refs);
+    if (c == 1) {  // 强引用计数只剩下一个时，执行下面逻辑，会调用被引用用对象的onLastStrongRef方法
+        const_cast&lt;RefBase*&gt;(this)-&gt;onLastStrongRef(id);
+        if ((refs-&gt;mFlags&amp;OBJECT_LIFETIME_WEAK) != OBJECT_LIFETIME_WEAK) {
+            delete this; /* 释放对象所占用的内存，同时会导致RefBase类的析构函数被调用; */
+        }
+    }
+    refs-&gt;removeWeakRef(id);
+    refs-&gt;decWeak(id); //减少弱引用计数
+}
+
+RefBase::~RefBase()
+{
+//    LOGV(&quot;Destroying RefBase %p (refs %p)\n&quot;, this, mRefs);
+    if (mRefs-&gt;mWeak == 0) {
+        /* 如果对象的弱引用计数值为0，那么就把引用计数对象 mRefs 也一起释放; */
+//        LOGV(&quot;Freeing refs %p of old RefBase %p\n&quot;, mRefs, this);
+        delete mRefs;
+    }
+}
+
+void RefBase::weakref_type::decWeak(const void* id)
+{
+    weakref_impl* const impl = static_cast&lt;weakref_impl*&gt;(this);
+    impl-&gt;removeWeakRef(id); // 空函数,调试用;
+    const int32_t c = android_atomic_dec(&amp;impl-&gt;mWeak); // 减少对象的弱引用计数;
+    LOG_ASSERT(c &gt;= 1, &quot;decWeak called on %p too many times&quot;, this);
+    if (c != 1) return;
+    /* 如果 c 的值不等于 1，那么说明还有其他的弱指针在引用这个对象，则不再做处理，直接返回; */
+   
+    /* 走到这里，说明没有弱指针引用这个对象了，也没有强指针引用这个对象了。
+     * 基于对象的生命周期控制方式，确认该对象是否要释放掉;
+     */
+    if ((impl-&gt;mFlags&amp;OBJECT_LIFETIME_WEAK) != OBJECT_LIFETIME_WEAK) {
+        /* 生命周期只受强引用计数控制; */
+        if (impl-&gt;mStrong == INITIAL_STRONG_VALUE)
+            delete impl-&gt;mBase; /* 强引用计数为0，则释放; */
+        else {
+//            LOGV(&quot;Freeing refs %p of old RefBase %p\n&quot;, this, impl-&gt;mBase);
+            delete impl;
+        }
+    } else {
+        /* 生命周期受弱引用计数控制，先调用 onLastWeakRef 处理逻辑；  */
+        impl-&gt;mBase-&gt;onLastWeakRef(id);
+        if ((impl-&gt;mFlags&amp;OBJECT_LIFETIME_FOREVER) != OBJECT_LIFETIME_FOREVER) {
+            /* 如果生命周期控制不是 OBJECT_LIFETIME_FOREVER，则释放内存；*/
+            delete impl-&gt;mBase;
+        } /* 如果生命周期控制是 OBJECT_LIFETIME_FOREVER，即对象的生命周期完全不受强引用计数
+           * 和弱引用计数控制时，智能指针就退化成一个普通的 C++ 指针了，需要开发人员手动释放内存。
+           */
+    }
+}
+</code></pre>
+<h3 id="对象的生命周期控制方式小结">对象的生命周期控制方式小结</h3>
+<p>（1）如果一个对象的生命周期控制标志值被设置为0，那么只要它的强引用计数值为0，系统就会自动释放这个对象。</p>
+<p>（2）如果一个对象的生命周期控制标志值被设置为 OBJECT_LIFETIME_WEAK，那么只有当它的强引用计数值和弱引用计数值都为0时，系统才会自动释放这个对象。</p>
+<p>（3）如果一个对象的生命周期控制标志值被设置为 OBJECT_LIFETIME_FOREVER，那么系统就永远不会自动释放这个对象，它需要由开发人员来手动地释放。</p>
+<h2 id="322弱指针的实现原理分析">3.2.2,弱指针的实现原理分析</h2>
+<p>如果一个类的对象支持使用弱指针，那么这个类就必须要从 RefBase 类继承下来，因为 RefBase 类提供了弱引用计数器。</p>
+<h3 id="wp类的定义">wp类的定义</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">/* wp类是一个模板类，模板参数 T 表示对象的实际类型，它必须是从 RefBase 类继承下来的。 */
+template &lt;typename T&gt;
+class wp
+{
+public:
+    /* weakref_type 用来维护对象的弱引用计数; */
+    typedef typename RefBase::weakref_type weakref_type;
+   
+    /* m_ptr 用来指向它所引用的对象; */
+    inline wp() : m_ptr(0) { }
+
+    wp(T* other);
+    wp(const wp&lt;T&gt;&amp; other);
+    wp(const sp&lt;T&gt;&amp; other);
+    template&lt;typename U&gt; wp(U* other);
+    template&lt;typename U&gt; wp(const sp&lt;U&gt;&amp; other);
+    template&lt;typename U&gt; wp(const wp&lt;U&gt;&amp; other);
+
+    ~wp();
+   
+    // Assignment
+
+    wp&amp; operator = (T* other);
+    wp&amp; operator = (const wp&lt;T&gt;&amp; other);
+    wp&amp; operator = (const sp&lt;T&gt;&amp; other);
+   
+    template&lt;typename U&gt; wp&amp; operator = (U* other);
+    template&lt;typename U&gt; wp&amp; operator = (const wp&lt;U&gt;&amp; other);
+    template&lt;typename U&gt; wp&amp; operator = (const sp&lt;U&gt;&amp; other);
+   
+    void set_object_and_refs(T* other, weakref_type* refs);
+
+    // promotion to sp
+   
+    sp&lt;T&gt; promote() const;
+
+    // Reset
+   
+    void clear();
+
+    // Accessors
+   
+    inline  weakref_type* get_refs() const { return m_refs; }
+   
+    inline  T* unsafe_get() const { return m_ptr; }
+
+    // Operators
+
+    COMPARE_WEAK(==)
+    COMPARE_WEAK(!=)
+    COMPARE_WEAK(&gt;)
+    COMPARE_WEAK(&lt;)
+    COMPARE_WEAK(&lt;=)
+    COMPARE_WEAK(&gt;=)
+
+    inline bool operator == (const wp&lt;T&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) &amp;&amp; (m_refs == o.m_refs);
+    }
+    template&lt;typename U&gt;
+    inline bool operator == (const wp&lt;U&gt;&amp; o) const {
+        return m_ptr == o.m_ptr;
+    }
+
+    inline bool operator &gt; (const wp&lt;T&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) ? (m_refs &gt; o.m_refs) : (m_ptr &gt; o.m_ptr);
+    }
+    template&lt;typename U&gt;
+    inline bool operator &gt; (const wp&lt;U&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) ? (m_refs &gt; o.m_refs) : (m_ptr &gt; o.m_ptr);
+    }
+
+    inline bool operator &lt; (const wp&lt;T&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) ? (m_refs &lt; o.m_refs) : (m_ptr &lt; o.m_ptr);
+    }
+    template&lt;typename U&gt;
+    inline bool operator &lt; (const wp&lt;U&gt;&amp; o) const {
+        return (m_ptr == o.m_ptr) ? (m_refs &lt; o.m_refs) : (m_ptr &lt; o.m_ptr);
+    }
+                         inline bool operator != (const wp&lt;T&gt;&amp; o) const { return m_refs != o.m_refs; }
+    template&lt;typename U&gt; inline bool operator != (const wp&lt;U&gt;&amp; o) const { return !operator == (o); }
+                         inline bool operator &lt;= (const wp&lt;T&gt;&amp; o) const { return !operator &gt; (o); }
+    template&lt;typename U&gt; inline bool operator &lt;= (const wp&lt;U&gt;&amp; o) const { return !operator &gt; (o); }
+                         inline bool operator &gt;= (const wp&lt;T&gt;&amp; o) const { return !operator &lt; (o); }
+    template&lt;typename U&gt; inline bool operator &gt;= (const wp&lt;U&gt;&amp; o) const { return !operator &lt; (o); }
+
+private:
+    template&lt;typename Y&gt; friend class sp;
+    template&lt;typename Y&gt; friend class wp;
+
+    T*              m_ptr;
+    weakref_type*   m_refs;
+};
+</code></pre>
+<p>弱指针与强指针有一个很大的区别，就是弱指针不可以直接操作它所引用的对象，因为它所引用的对象可能是不受弱引用计数控制的，即它所引用的对象可能是一个无效的对象。因此，如果需要操作一个弱指针所引用的对象，那么就需要将这个弱指针升级为强指针，这是通过调用它的成员函数 promote 来实现的。如果升级成功，就说明该弱指针所引用的对象还没有被销毁，可以正常使用。</p>
+<h3 id="wp类的构造函数">wp类的构造函数</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+wp&lt;T&gt;::wp(T* other)
+    : m_ptr(other)
+{
+    // 实际调用 RefBase类的成员函数 createWeak 来增加对象的弱引用计数;
+    if (other) m_refs = other-&gt;createWeak(this);
+}
+</code></pre>
+<p>frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">RefBase::weakref_type* RefBase::createWeak(const void* id) const
+{
+    /* RefBase类的成员变量 mRefs 指向的是一个 weakref_impl 对象;
+     * incWeak 是增加实际引用对象的弱引用计数;
+     */
+    mRefs-&gt;incWeak(id);
+    return mRefs;
+}
+</code></pre>
+<h3 id="wp类的析构函数">wp类的析构函数</h3>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+wp&lt;T&gt;::~wp()
+{
+    /* m_refs 指向一个 weakref_impl 对象，下面调用了 weakref_impl 类的 decWeak 来减少对象的弱引用计数; */
+    if (m_ptr) m_refs-&gt;decWeak(this);
+}
+</code></pre>
+<h3 id="wp类的成员函数promote弱指针升级为强指针">wp类的成员函数promote，弱指针升级为强指针</h3>
+<p>wp类没有重载*和-＞操作符号，所以不能直接操作它所引用的对象。</p>
+<p>promote函数实现：</p>
+<p>文件路径：frameworks/base/include/utils/RefBase.h</p>
+<pre><code class="language-C++">template&lt;typename T&gt;
+sp&lt;T&gt; wp&lt;T&gt;::promote() const
+{
+    /* 弱指针升级为强指针的方式是通过内部的成员变量 m_prt 和 m_refs 来创建一个强指针; */
+    return sp&lt;T&gt;(m_ptr, m_refs);
+}
+
+template&lt;typename T&gt;
+sp&lt;T&gt;::sp(T* p, weakref_type* refs)
+    : m_ptr((p &amp;&amp; refs-&gt;attemptIncStrong(this)) ? p : 0)
+{
+    /* 参数 p 指向对象的地址，而参数 regs 指向对象内部的一个弱引用计数器对象;
+     * 只有在对象地址不为 NULL 的情况下，才会调用它内部的弱引用计数对象的成员函数 attemptIncStrong 来试图增加该对象的强引用计数;
+     * 如果能够成功增加对象的强引用计数，那么就可以成功地把一个弱指针升级为一个强指针了。
+     * 参数 refs 是一个类型为 weakref_type 的指针，即会调用 weakref_type 类的成员函数 attemptIncStrong;
+     */
+}
+</code></pre>
+<p>attemptIncStrong函数实现：</p>
+<p>文件路径：frameworks/base/libs/utils/RefBase.cpp</p>
+<pre><code class="language-C++">/* attemptIncStrong 试图增加目标对象的强引用计数，但是可能会增加失败，因为目标对象
+ * 可能已经被释放了，或者该目标对象不允许使用强指针引用它。
+ */
+bool RefBase::weakref_type::attemptIncStrong(const void* id)
+{
+    incWeak(id); // 调用 incWeak 来增加对象的弱引用计数;
+   
+    /* 将 this 指针转换为一个 weakref_impl 指针，保存在 impl 中; */
+    weakref_impl* const impl = static_cast&lt;weakref_impl*&gt;(this);
+   
+    int32_t curCount = impl-&gt;mStrong;
+    LOG_ASSERT(curCount &gt;= 0, &quot;attemptIncStrong called on %p after underflow&quot;,
+               this);
+
+    /* 该对象正在被其他强指针所引用，即它的强引用计数值大于0，并且不等于 INITIAL_STRONG_VALUE; */
+    while (curCount &gt; 0 &amp;&amp; curCount != INITIAL_STRONG_VALUE) {
+        /* 直接将对象的强引用计数值增加1;
+         * android_atomic_cmpxchg 定义在 system/core/include/cutils/atomic.h 文件;
+         *  #define android_atomic_cmpxchg android_atomic_release_cas
+         *  int android_atomic_release_cas(int32_t oldvalue, int32_t newvalue, volatile int32_t* addr);
+         * =&gt; system/core/include/cutils/atomic-arm.h
+         *          extern inline int android_atomic_release_cas(int32_t old_value,
+         *                                   int32_t new_value,
+         *                                   volatile int32_t *ptr)
+         *           {
+         *                android_memory_barrier();
+         *                return android_atomic_cas(old_value, new_value, ptr);
+         *           }
+         *  android_atomic_cas 函数依据不同的CPU类型，执行不同的实现函数。
+         *
+         * android_atomic_release_cas 的工作原理：如果它发现地址 addr 的内容等于参数 oldvalue 的值，
+         * 那么它就会将地址 addr 的内容修改为 newvalue，然后给调用者返回 0，表示修改地址 addr 的内容成功；
+         * 否则，就什么也不做，然后给调用者返回 1 。
+         * 下面这一行，是增加对象的强引用计数，如果增加失败，则循环执行；
+         */
+        if (android_atomic_cmpxchg(curCount, curCount+1, &amp;impl-&gt;mStrong) == 0) {
+            break;
+        }
+        curCount = impl-&gt;mStrong;
+    }
+   
+    if (curCount &lt;= 0 || curCount == INITIAL_STRONG_VALUE) {
+        bool allow;
+        if (curCount == INITIAL_STRONG_VALUE) {
+            /* 对象的强引用计数值为 INITIAL_STRONG_VALUE，说明这个对象从来没有被强指针引用过;
+             * 下面根据对象的声明周期控制方式或者对象的实现来判断是否允许将一个引用了它的弱指针升级为强指针。
+             * 如果对象的生命周期只受强引用计数影响，那么就可以成功地将该弱指针升级为强指针；
+             *
+             */
+            // Attempting to acquire first strong reference...  this is allowed
+            // if the object does NOT have a longer lifetime (meaning the
+            // implementation doesn't need to see this), or if the implementation
+            // allows it to happen.
+            allow = (impl-&gt;mFlags&amp;OBJECT_LIFETIME_WEAK) != OBJECT_LIFETIME_WEAK
+                  || impl-&gt;mBase-&gt;onIncStrongAttempted(FIRST_INC_STRONG, id);
+        } else {
+            /*
+             * 如果对象的强引用计数值小于等于0，说明对象之前被强指针引用过，因此，就必须要保证对象的生命周期受到弱引用计数的影响；
+             * 否则，对象就已经被释放了。
+             * 如果对象的生命周期受弱引用计数影响，那么说明对象现在肯定是存在的；
+             * 需要调用 onIncStrongAttempted 确认对象是否允许强指针引用它;
+             * 如果 onIncStrongAttempted 返回 ture，就说明允许使用强指针来引用它，这种情况可以成功地将弱指针升级为强指针;
+             */
+            // Attempting to revive the object...  this is allowed
+            // if the object DOES have a longer lifetime (so we can safely
+            // call the object with only a weak ref) and the implementation
+            // allows it to happen.
+            allow = (impl-&gt;mFlags&amp;OBJECT_LIFETIME_WEAK) == OBJECT_LIFETIME_WEAK
+                  &amp;&amp; impl-&gt;mBase-&gt;onIncStrongAttempted(FIRST_INC_STRONG, id);            
+        }
+        if (!allow) {
+            /* 如果 allow 的值为 false，那就说明弱指针升级为强指针失败，于是
+             * 减少对象的弱引用计数，然后返回false;
+             */    
+            decWeak(id);
+            return false;
+        }
+
+        /* 运行到这里，说明 allow 为 true，即 弱指针升级为强指针成功；
+         * 下面增加对象的强引用计数;
+         */
+        curCount = android_atomic_inc(&amp;impl-&gt;mStrong);
+
+        // If the strong reference count has already been incremented by
+        // someone else, the implementor of onIncStrongAttempted() is holding
+        // an unneeded reference.  So call onLastStrongRef() here to remove it.
+        // (No, this is not pretty.)  Note that we MUST NOT do this if we
+        // are in fact acquiring the first reference.
+        if (curCount &gt; 0 &amp;&amp; curCount &lt; INITIAL_STRONG_VALUE) {
+            impl-&gt;mBase-&gt;onLastStrongRef(id);
+        }
+    }
+   
+    impl-&gt;addWeakRef(id);
+    impl-&gt;addStrongRef(id);
+
+#if PRINT_REFS
+    LOGD(&quot;attemptIncStrong of %p from %p: cnt=%d\n&quot;, this, id, curCount);
+#endif
+
+    if (curCount == INITIAL_STRONG_VALUE) {
+        android_atomic_add(-INITIAL_STRONG_VALUE, &amp;impl-&gt;mStrong);
+        impl-&gt;mBase-&gt;onFirstRef();
+    }
+   
+    return true;
+}
+
+bool RefBase::onIncStrongAttempted(uint32_t flags, const void* id)
+{
+    return (flags&amp;FIRST_INC_STRONG) ? true : false;
+}
+</code></pre>
+<h2 id="323应用实例分析">3.2.3,应用实例分析</h2>
+<p>我们在external目录下建立一个C++应用程序weightpointer来说明强指针和弱指针的使用方法，它的目录结构如下:</p>
+<pre><code class="language-shell">~/aosp
+----external
+    ----weightpointer
+        ----weightpointer.cpp
+        ----Android.mk
+</code></pre>
+<h3 id="weightpointercpp">weightpointer.cpp</h3>
+<p>文件路径: aosp/external/weightpointer/weightpointer.cpp</p>
+<pre><code class="language-C++">#include &lt;stdio.h&gt;
+#include &lt;utils/RefBase.h&gt;
+
+#define INITIAL_STRONG_VALUE (1&lt;&lt;28)
+
+using namespace android;
+
+class WeightClass : public RefBase
+{
+public:
+        void printRefCount() // 打印对象的引用计数，包括强引用计数和弱引用计数;
+        {
+                int32_t strong = getStrongCount();
+                weakref_type* ref = getWeakRefs();
+
+                printf(&quot;-----------------------\n&quot;);
+                printf(&quot;Strong Ref Count: %d.\n&quot;, (strong  == INITIAL_STRONG_VALUE ? 0 : strong));
+                printf(&quot;Weak Ref Count: %d.\n&quot;, ref-&gt;getWeakCount());
+                printf(&quot;-----------------------\n&quot;);
+        }
+};
+
+class StrongClass : public WeightClass
+{
+public:
+        StrongClass()
+        {
+                printf(&quot;Construct StrongClass Object.\n&quot;);
+        }
+
+        virtual ~StrongClass()
+        {
+                printf(&quot;Destory StrongClass Object.\n&quot;);
+        }
+};
+
+class WeakClass : public WeightClass
+{
+public:
+        WeakClass()
+        {
+                extendObjectLifetime(OBJECT_LIFETIME_WEAK); // 对象的生命周期同时受到强引用计数和弱引用计数的影响;
+                printf(&quot;Construct WeakClass Object.\n&quot;);
+        }
+
+        virtual ~WeakClass()
+        {
+                printf(&quot;Destory WeakClass Object.\n&quot;);
+        }
+};
+
+class ForeverClass : public WeightClass
+{
+public:
+        ForeverClass()
+        {
+                extendObjectLifetime(OBJECT_LIFETIME_FOREVER); // 对象的生命周期完全不受强引用计数和弱引用计数的影响;
+                printf(&quot;Construct ForeverClass Object.\n&quot;);
+        }
+
+        virtual ~ForeverClass()
+        {
+                printf(&quot;Destory ForeverClass Object.\n&quot;);
+        }
+};
+
+
+void TestStrongClass(StrongClass* pStrongClass)
+{
+        wp&lt;StrongClass&gt; wpOut = pStrongClass; // 将一个 StrongClass 对象赋值给一个弱指针 wpOut;
+        pStrongClass-&gt;printRefCount(); // 打印出该 StrongClass 对象的强引用计数值和弱引用计数值;（0和1）
+
+        {
+                sp&lt;StrongClass&gt; spInner = pStrongClass; // 将该 StrongClass对象赋值给一个强指针 spInner;
+                pStrongClass-&gt;printRefCount(); // 打印出该 StrongClass 对象的强引用计数值和弱引用计数值;（1和2）
+        }
+       
+        sp&lt;StrongClass&gt; spOut = wpOut.promote(); // spInner被析构,且由于对象 StrongClass 对象的生命周期只受强引用计数的影响，这里强引用计数为0，那么该StrongClass对象会自动被释放; 下面试图将弱指针 wpOut 升级为 强指针，但是由于弱指针 wpOut 所引用的 StrongClass 对象已经被释放，因此，弱指针 wpOut 升级为强指针就会失败;
+        printf(&quot;spOut: %p.\n&quot;, spOut.get());
+}
+
+void TestWeakClass(WeakClass* pWeakClass)
+{
+        wp&lt;WeakClass&gt; wpOut = pWeakClass; // 将一个 WeakClass 对象赋值给一个弱指针，因此该 WeakClass 对象的强引用计数值和弱引用计数值应该分别为0和1；
+        pWeakClass-&gt;printRefCount();
+
+        {
+                sp&lt;WeakClass&gt; spInner = pWeakClass; // 将该 WeakClass 对象赋值给一个强指针 spInner；
+                pWeakClass-&gt;printRefCount(); // 该 WeakClass 对象的强引用计数值和弱引用计数值分别为1和2;
+        }
+        // spInner被析构，该 WeakClass 对象的强引用计数值和弱引用计数值应该分别为0和1；由于该 WeakClass 对象的生命周期同时受强引用计数和弱引用计数的影响，因此，此时该 WeakClass 对象不会被释放。
+        pWeakClass-&gt;printRefCount();
+        sp&lt;WeakClass&gt; spOut = wpOut.promote(); // 试图将弱指针 wpOut 升级为 强指针，由于弱指针 wpOut 所引用的 WeakClass 对象还存在，因此，弱指针 wpOut 就能够成功升级为强指针 spOut;
+        printf(&quot;spOut: %p.\n&quot;, spOut.get()); // 该 WeakClass 对象的强引用计数值和弱引用计数值应该分别为1和2；
+}
+
+void TestForeverClass(ForeverClass* pForeverClass)
+{
+        wp&lt;ForeverClass&gt; wpOut = pForeverClass; // 将一个 ForeverClass 对象赋值给一个弱指针 wpOut，因此，该 ForeverClass 对象的强引用计数值和弱引用计数值分别为0和1;
+        pForeverClass-&gt;printRefCount();
+
+        {
+                sp&lt;ForeverClass&gt; spInner = pForeverClass; // 将该 ForeverClass 对象赋值给一个强指针 spInner；
+                pForeverClass-&gt;printRefCount(); // 该 ForeverClass 对象的强引用计数值和弱引用计数值分别为1和2;
+        }
+        // spInner被析构，该 ForeverClass 对象的强引用计数值和弱引用计数值应该分别为0和1；由于该 ForeverClass 对象的生命周期不受强引用计数和弱引用计数的影响，因此，此时该 ForeverClass 对象不会被释放。
+
+        // 当 TestForeverClass 函数返回，wpOut被析构，该 ForeverClass 对象的强引用计数值和弱引用计数值应该分别为0和0；由于该 ForeverClass 对象的生命周期不受强引用计数和弱引用计数的影响，因此，此时该 ForeverClass 对象不会被释放。
+}
+
+int main(int argc, char** argv)
+{
+        printf(&quot;Test Strong Class: \n&quot;);
+        StrongClass* pStrongClass = new StrongClass();
+        TestStrongClass(pStrongClass);
+
+        printf(&quot;\nTest Weak Class: \n&quot;);
+        WeakClass* pWeakClass = new WeakClass();
+        TestWeakClass(pWeakClass);
+
+        printf(&quot;\nTest Froever Class: \n&quot;);
+        ForeverClass* pForeverClass = new ForeverClass();
+        TestForeverClass(pForeverClass);
+        pForeverClass-&gt;printRefCount();
+        delete pForeverClass;
+
+        return 0;
+}
+</code></pre>
+<h3 id="androidmk-2">Android.mk</h3>
+<p>文件路径: aosp/external/weightpointer/Android.mk</p>
+<pre><code class="language-makefile">LOCAL_PATH := $(call my-dir)
+include $(CLEAR_VARS)
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE := weightpointer
+LOCAL_SRC_FILES := weightpointer.cpp
+LOCAL_SHARED_LIBRARIES :=  \
+    libcutils \
+    libutils
+include $(BUILD_EXECUTABLE)
+</code></pre>
+<p>Android.mk是应用程序 weightpointer 的编译脚本文件，它引用了 libcutils 和 libutils 两个库。</p>
+<h3 id="编译运行-2">编译&amp;运行</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./external/weightpointer
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1`
+target thumb C++: weightpointer &lt;= external/weightpointer/weightpointer.cpp
+target Executable: weightpointer (out/target/product/generic/obj/EXECUTABLES/weightpointer_intermediates/LINKED/weightpointer)
+target Non-prelinked: weightpointer (out/target/product/generic/symbols/system/bin/weightpointer)
+target Strip: weightpointer (out/target/product/generic/obj/EXECUTABLES/weightpointer_intermediates/weightpointer)
+Install: out/target/product/generic/system/bin/weightpointer
+make: Leaving directory `/home/dt/2.3.1_r1`
+
+dt@ubuntu:~/2.3.1_r1$ make snod
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+Install: out/host/linux-x86/bin/mkyaffs2image
+make snod: ignoring dependencies
+Target system fs image: out/target/product/generic/system.img
+
+dt@ubuntu:~/2.3.1_r1$ cp out/target/product/generic/system.img /mnt/hgfs/AndroidEmulator/images/system.img
+
+
+[win]&gt; pushd d:\AndroidEmulator
+[win]&gt; start /b emulator.exe -sysdir d:\AndroidEmulator -system images\system.img -data images\userdata.img -ramdisk images\ramdisk.img -kernel images\zImage -skindir d:\AndroidEmulator\skins -skin HVGA
+
+[win]&gt; adb shell
+# cd /system/bin
+# ./weightpointer
+Test Strong Class:
+Construct StrongClass Object.
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 1.
+-----------------------
+-----------------------
+Strong Ref Count: 1.
+Weak Ref Count: 2.
+-----------------------
+Destory StrongClass Object.
+spOut: 0x0.
+
+Test Weak Class:
+Construct WeakClass Object.
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 1.
+-----------------------
+-----------------------
+Strong Ref Count: 1.
+Weak Ref Count: 2.
+-----------------------
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 1.
+-----------------------
+spOut: 0xa528.
+Destory WeakClass Object.
+
+Test Froever Class:
+Construct ForeverClass Object.
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 1.
+-----------------------
+-----------------------
+Strong Ref Count: 1.
+Weak Ref Count: 2.
+-----------------------
+-----------------------
+Strong Ref Count: 0.
+Weak Ref Count: 0.
+-----------------------
+Destory ForeverClass Object.
+#
+</code></pre>
+<h1 id="找找android源码中使用智能指针的场景">找找Android源码中使用智能指针的场景</h1>
+<p>在 Android15.0.0_r1 中搜索 onFirstRef 关键字，然后粗略定位哪些模块使用了智能指针：</p>
+<pre><code class="language-shell">/frameworks/av/services/audiopolicy/service/AudioRecordClient.cpp
+/frameworks/native/services/sensorservice/SensorDeviceUtils.cpp
+/hardware/interfaces/broadcastradio/1.0/default/BroadcastRadio.cpp
+/system/libhwbinder/BpHwBinder.cpp
+/frameworks/av/services/audioflinger/PatchCommandThread.cpp
+/frameworks/av/services/audioflinger/DeviceEffectManager.cpp
+/hardware/interfaces/soundtrigger/2.0/default/SoundTriggerHalImpl.cpp
+/hardware/interfaces/soundtrigger/2.2/default/SoundTriggerHw.cpp
+/hardware/interfaces/soundtrigger/2.3/default/SoundTriggerHw.cpp
+/frameworks/av/media/libaudiohal/impl/DevicesFactoryHalHidl.cpp
+/frameworks/native/services/sensorservice/SensorDirectConnection.cpp
+/frameworks/base/core/jni/android_hardware_SensorManager.cpp
+/frameworks/native/libs/binder/BpBinder.cpp
+/frameworks/av/services/audioflinger/MelReporter.cpp
+/frameworks/native/services/sensorservice/SensorEventConnection.cpp
+/frameworks/av/services/audiopolicy/service/Spatializer.cpp
+/frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp
+/system/libhidl/transport/ServiceManagement.cpp
+/frameworks/base/cmds/bootanimation/BootAnimation.cpp
+/frameworks/native/libs/gui/SurfaceComposerClient.cpp
+/frameworks/av/media/libaudioclient/AudioTrack.cpp
+</code></pre>
+<p>从上面过滤的文件可以看出，开机动画 bootanimation 模块，使用了智能指针；然后就是传感器 sensor 模块，应该也使用了，还有就是音频模块。</p>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[[实验3_app]_[2.5_开发Android应用程序来使用硬件访问服务]]]></title>
+        <id>https://pinggle.github.io/post/shi-yan-3_app_25_-kai-fa-android-ying-yong-cheng-xu-lai-shi-yong-ying-jian-fang-wen-fu-wu/</id>
+        <link href="https://pinggle.github.io/post/shi-yan-3_app_25_-kai-fa-android-ying-yong-cheng-xu-lai-shi-yong-ying-jian-fang-wen-fu-wu/">
+        </link>
+        <updated>2025-02-11T10:15:05.000Z</updated>
+        <content type="html"><![CDATA[<h2 id="回顾">回顾</h2>
+<p>我们首先看一下Android体系结构图：<br>
+<img src="https://pinggle.github.io/post-images/1739268928321.png" alt="" loading="lazy"></p>
+<p>在第2章，我们从 Linux Device Drivers，到 HAL，External Libraries &amp; Android Runtime，Application Framework 再到 Applications，自底向上实现来一个应用程序控制Freg硬件驱动。</p>
+<p>画图：https://www.processon.com/diagraming/674eb1c592740c307cc423ea</p>
+<figure data-type="image" tabindex="1"><img src="https://pinggle.github.io/post-images/1739268983833.png" alt="" loading="lazy"></figure>
+<h2 id="25开发android应用程序来使用硬件访问服务">2.5,开发Android应用程序来使用硬件访问服务</h2>
+<p>目标：开发Android应用程序，通过硬件访问服务FregService来访问虚拟硬件设备freg的寄存器val的值。</p>
+<p>Freg应用程序的目录结构：</p>
+<pre><code class="language-shell">aosp/packages/experimental/Freg
+----AndroidManifest.xml
+----Android.mk
+----src
+    ----shy/luo/freg
+        ----Freg.java
+----res
+    ----layout
+        ----main.xml
+    ----values
+        ----strings.xml
+    ----drawable
+        ----icon.png
+</code></pre>
+<p>Freg应用程序包含一个源代码目录src，一个资源目录res，一个配置文件AndroidManifest.xml和一个编译脚本文件Android.mk。</p>
+<h3 id="fregjava">Freg.java</h3>
+<p>文件路径：packages/experimental/Freg/src/shy/luo/freg/Freg.java</p>
+<p>文件定义了一个Activity组件Freg，它是应用程序Freg的主界面。在Activity组件Freg的界面上，有一个编辑框和三个按钮Read、Write和Clear，其中，编辑框用来显示或者输入虚拟硬件设备freg的寄存器val的值；按钮Read和Write分别用来读写虚拟硬件设备freg的寄存器val，而按钮Clear用来清空编辑框。</p>
+<pre><code class="language-java">package shy.luo.freg;
+
+import android.app.Activity;
+import android.os.ServiceManager;
+import android.os.Bundle;
+import android.os.IFregService;
+import android.os.RemoteException;
+import android.util.Log;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.Button;
+import android.widget.EditText;
+
+public class Freg extends Activity implements OnClickListener {
+    private final static String LOG_TAG = &quot;shy.luo.freg.FregActivity&quot;;
+
+    private IFregService fregService = null;
+
+    private EditText valueText = null;
+    private Button readButton = null;
+    private Button writeButton = null;
+    private Button clearButton = null;
+
+    /** Called when the activity is first created. */
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.main);
+
+        // 通过 Service Manager 获得一个名称为&quot;freg&quot;的服务的Binder代理对象接口。
+        // 这个服务对应于运行在系统进程System中的硬件访问服务FregService。
+        fregService = IFregService.Stub.asInterface(
+                ServiceManager.getService(&quot;freg&quot;));
+
+        valueText = (EditText) findViewById(R.id.edit_value);
+        readButton = (Button) findViewById(R.id.button_read);
+        writeButton = (Button) findViewById(R.id.button_write);
+        clearButton = (Button) findViewById(R.id.button_clear);
+
+        readButton.setOnClickListener(this);
+        writeButton.setOnClickListener(this);
+        clearButton.setOnClickListener(this);
+
+        Log.i(LOG_TAG, &quot;Freg Activity Created&quot;);
+    }
+
+    @Override
+    public void onClick(View v) {
+        if (v.equals(readButton)) {
+            try {
+                int val = fregService.getVal();
+                String text = String.valueOf(val);
+                valueText.setText(text);
+                Log.i(LOG_TAG, &quot;Freg App read val :&quot; + text);
+            } catch (RemoteException e) {
+                Log.e(LOG_TAG, &quot;Remote Exception while reading value from freg service.&quot;);
+            }
+        } else if (v.equals(writeButton)) {
+            try {
+                String text = valueText.getText().toString();
+                int val = Integer.parseInt(text);
+                fregService.setVal(val);
+                Log.i(LOG_TAG, &quot;Freg App write val :&quot; + val);
+            } catch (RemoteException e) {
+                Log.e(LOG_TAG, &quot;Remote Exception while writing value to freg service.&quot;);
+            }
+        } else if (v.equals(clearButton)) {
+            String text = &quot;&quot;;
+            valueText.setText(text);
+        }
+    }
+}
+</code></pre>
+<h3 id="mainxml">main.xml</h3>
+<p>文件路径：packages/experimental/Freg/res/layout/main.xml</p>
+<p>这是应用程序Freg的主界面配置文件，在屏幕中显示一个 TextView 空间和三个 Button 控件。</p>
+<pre><code class="language-xml">&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;
+&lt;LinearLayout xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;
+    android:orientation=&quot;vertical&quot;
+    android:layout_width=&quot;fill_parent&quot;
+    android:layout_height=&quot;fill_parent&quot;
+    &gt;
+    &lt;LinearLayout
+        android:layout_width=&quot;fill_parent&quot;
+        android:layout_height=&quot;wrap_content&quot;
+        android:orientation=&quot;vertical&quot;
+        android:gravity=&quot;center&quot;&gt;
+        &lt;TextView
+            android:layout_width=&quot;wrap_content&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:text=&quot;@string/value&quot;&gt;
+        &lt;/TextView&gt;
+        &lt;EditText
+            android:layout_width=&quot;fill_parent&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:id=&quot;@+id/edit_value&quot;
+            android:hint=&quot;@string/hint&quot;&gt;
+        &lt;/EditText&gt;
+    &lt;/LinearLayout&gt;
+     &lt;LinearLayout
+        android:layout_width=&quot;fill_parent&quot;
+        android:layout_height=&quot;wrap_content&quot;
+        android:orientation=&quot;horizontal&quot;
+        android:gravity=&quot;center&quot;&gt;
+        &lt;Button
+            android:id=&quot;@+id/button_read&quot;
+            android:layout_width=&quot;wrap_content&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:text=&quot;@string/read&quot;&gt;
+        &lt;/Button&gt;
+        &lt;Button
+            android:id=&quot;@+id/button_write&quot;
+            android:layout_width=&quot;wrap_content&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:text=&quot;@string/write&quot;&gt;
+        &lt;/Button&gt;
+        &lt;Button
+            android:id=&quot;@+id/button_clear&quot;
+            android:layout_width=&quot;wrap_content&quot;
+            android:layout_height=&quot;wrap_content&quot;
+            android:text=&quot;@string/clear&quot;&gt;
+        &lt;/Button&gt;
+    &lt;/LinearLayout&gt;
+&lt;/LinearLayout&gt;
+</code></pre>
+<h3 id="stringsxml">strings.xml</h3>
+<p>文件路径：packages/experimental/Freg/res/values/strings.xml</p>
+<pre><code class="language-xml">&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;
+&lt;resources&gt;
+    &lt;string name=&quot;app_name&quot;&gt;Freg&lt;/string&gt;
+    &lt;string name=&quot;value&quot;&gt;Value&lt;/string&gt;
+    &lt;string name=&quot;hint&quot;&gt;Please input a value...&lt;/string&gt;
+    &lt;string name=&quot;read&quot;&gt;Read&lt;/string&gt;
+    &lt;string name=&quot;write&quot;&gt;Write&lt;/string&gt;
+    &lt;string name=&quot;clear&quot;&gt;Clear&lt;/string&gt;
+&lt;/resources&gt;
+</code></pre>
+<h3 id="iconpng">icon.png</h3>
+<p>文件路径: packages/experimental/Freg/res/drawable/icon.png</p>
+<p>这是应用程序Freg的图标文件，可以根据需要来放置不同的图片文件。</p>
+<h3 id="androidmanifestxml">AndroidManifest.xml</h3>
+<p>文件路径：packages/experimental/Freg/AndroidManifest.xml</p>
+<pre><code class="language-xml">&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;
+&lt;manifest xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;
+      package=&quot;shy.luo.freg&quot;
+      android:versionCode=&quot;1&quot;
+      android:versionName=&quot;1.0&quot;&gt;
+    &lt;application android:icon=&quot;@drawable/icon&quot; android:label=&quot;@string/app_name&quot;&gt;
+        &lt;activity android:name=&quot;.Freg&quot;
+                  android:label=&quot;@string/app_name&quot;&gt;
+            &lt;intent-filter&gt;
+                &lt;action android:name=&quot;android.intent.action.MAIN&quot; /&gt;
+                &lt;category android:name=&quot;android.intent.category.LAUNCHER&quot; /&gt;
+            &lt;/intent-filter&gt;
+        &lt;/activity&gt;
+    &lt;/application&gt;
+&lt;/manifest&gt;
+</code></pre>
+<h3 id="androidmk">Android.mk</h3>
+<p>文件路径：packages/experimental/Freg/Android.mk</p>
+<p>这是应用程序Freg的编译脚本文件，指定程序的名称为&quot;Freg&quot;。</p>
+<pre><code class="language-makefile">LOCAL_PATH:= $(call my-dir)
+include $(CLEAR_VARS)
+
+LOCAL_MODULE_TAGS := optional
+
+LOCAL_SRC_FILES := $(call all-subdir-java-files)
+
+LOCAL_PACKAGE_NAME := Freg
+
+include $(BUILD_PACKAGE)
+</code></pre>
+<h3 id="编译">编译</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./packages/experimental/Freg/
+
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1`
+target R.java/Manifest.java: Freg (out/target/common/obj/APPS/Freg_intermediates/src/R.stamp)
+Warning: AndroidManifest.xml already defines versionCode (in http://schemas.android.com/apk/res/android); using existing value in manifest.
+Warning: AndroidManifest.xml already defines versionName (in http://schemas.android.com/apk/res/android); using existing value in manifest.
+target Java: Freg (out/target/common/obj/APPS/Freg_intermediates/classes)
+Copying: out/target/common/obj/APPS/Freg_intermediates/classes-jarjar.jar
+Copying: out/target/common/obj/APPS/Freg_intermediates/emma_out/lib/classes-jarjar.jar
+Copying: out/target/common/obj/APPS/Freg_intermediates/classes.jar
+Copying: out/target/common/obj/APPS/Freg_intermediates/noproguard.classes.jar
+target Dex: Freg
+Copying: out/target/common/obj/APPS/Freg_intermediates/noproguard.classes.dex
+target Package: Freg (out/target/product/generic/obj/APPS/Freg_intermediates/package.apk)
+Warning: AndroidManifest.xml already defines versionCode (in http://schemas.android.com/apk/res/android); using existing value in manifest.
+Warning: AndroidManifest.xml already defines versionName (in http://schemas.android.com/apk/res/android); using existing value in manifest.
+ 'out/target/common/obj/APPS/Freg_intermediates//classes.dex' as 'classes.dex'...
+Install: out/target/product/generic/system/app/Freg.apk
+make: Leaving directory `/home/dt/2.3.1_r1`
+
+dt@ubuntu:~/2.3.1_r1$ make snod
+
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+find: `frameworks/base/frameworks/base/docs/html': No such file or directory
+find: `out/target/common/docs/gen': No such file or directory
+Install: out/host/linux-x86/bin/mkyaffs2image
+make snod: ignoring dependencies
+Target system fs image: out/target/product/generic/system.img
+</code></pre>
+<p>打包后，得到的 Android 系统镜像文件 system.img 就包含有应用程序 Freg 了，下面我们启动模拟器看看：</p>
+<h3 id="运行">运行</h3>
+<pre><code class="language-shell">dt@ubuntu:~/goldfish$ cp out/target/product/generic/system.img /mnt/hgfs/AndroidEmulator/images/system.img
+dt@ubuntu:~/goldfish$ cp out/target/product/generic/ramdisk.img /mnt/hgfs/AndroidEmulator/images/ramdisk.img
+
+
+[win]&gt; pushd d:\AndroidEmulator
+[win]&gt; start /b emulator.exe -sysdir d:\AndroidEmulator -system images\system.img -data images\userdata.img -ramdisk images\ramdisk.img -kernel images\zImage -skindir d:\AndroidEmulator\skins -skin HVGA
+
+[win]&gt; adb logcat | grep freg
+I/FregServiceJNI(   66): Initializing HAL stub freg......
+I/FregServiceJNI(   66): Device freg found.
+I/FregHALStub(   66): Open device file /dev/freg successfully.
+I/FregServiceJNI(   66): Device freg is open.
+I/ActivityManager(   66): Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=shy.luo.freg/.Freg } from pid 131
+I/ActivityManager(   66): Start proc shy.luo.freg for activity shy.luo.freg/.Freg: pid=351 uid=10029 gids={}
+I/shy.luo.freg.FregActivity(  351): Freg Activity Created
+I/ActivityManager(   66): Displayed shy.luo.freg/.Freg: +1s853ms
+I/FregHALStub(   66): Get value 0 from device file /dev/freg.
+I/FregServiceJNI(   66): Get value 0 from device freg.
+I/shy.luo.freg.FregActivity(  351): Freg App read val :0
+I/FregServiceJNI(   66): Set value 68 to device freg.
+I/FregHALStub(   66): Set value 68 to device file /dev/freg.
+I/shy.luo.freg.FregActivity(  351): Freg App write val :68
+I/FregHALStub(   66): Get value 68 from device file /dev/freg.
+I/FregServiceJNI(   66): Get value 68 from device freg.
+I/shy.luo.freg.FregActivity(  351): Freg App read val :68
+I/FregServiceJNI(   66): Set value 6 to device freg.
+I/FregHALStub(   66): Set value 6 to device file /dev/freg.
+I/shy.luo.freg.FregActivity(  351): Freg App write val :6
+I/FregHALStub(   66): Get value 6 from device file /dev/freg.
+I/FregServiceJNI(   66): Get value 6 from device freg.
+I/shy.luo.freg.FregActivity(  351): Freg App read val :6
+</code></pre>
+<p>Android模拟器运行起来之后，我们就可以在应用程序启动器中启动应用程序 Freg 了，打开 Freg 输入68，点击【Write】按钮写入值，然后点击【Read】按钮，读取值。</p>
+<figure data-type="image" tabindex="2"><img src="https://pinggle.github.io/post-images/1739269179353.png" alt="" loading="lazy"></figure>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[[实验2_aosp]_[2.3_开发Android硬件抽象层模块_HAL]]]></title>
+        <id>https://pinggle.github.io/post/shi-yan-2_aosp_23_-kai-fa-android-ying-jian-chou-xiang-ceng-mo-kuai-_hal/</id>
+        <link href="https://pinggle.github.io/post/shi-yan-2_aosp_23_-kai-fa-android-ying-jian-chou-xiang-ceng-mo-kuai-_hal/">
+        </link>
+        <updated>2025-02-11T02:29:58.000Z</updated>
+        <content type="html"><![CDATA[<h1 id="23开发android硬件抽象层模块_动态链接库so">2.3，开发Android硬件抽象层模块_动态链接库so</h1>
+<h2 id="232编写硬件抽象层模块接口_编写动态链接库so">2.3.2，编写硬件抽象层模块接口_编写动态链接库so</h2>
+<p>硬件抽象层中的模块接口源文件一般保存在: aosp/hardware/libhardware 目录中。我们将虚拟硬件freg在硬件抽象层中的模块名称定义为freg，目录机构如下：</p>
+<pre><code class="language-shell">aosp/hardware/libhardware
+----include
+    ----hardware
+        ----freg.h
+modules
+    ----freg
+        ----freg.cpp
+        ----Android.mk
+</code></pre>
+<p>它由三个文件组成，其中，freg.h 和 freg.cpp 是源代码文件，而 Android.mk 是模块的编译脚本文件。</p>
+<h3 id="fregh">freg.h</h3>
+<p>文件路径: 2.3.1_r1/hardware/libhardware/include/hardware/freg.h</p>
+<pre><code class="language-c">#ifndef ANDROID_FREG_INTERFACE_H
+#define ANDROID_FREG_INTERFACE_H
+
+#include &lt;hardware/hardware.h&gt;
+
+__BEGIN_DECLS
+
+/**
+ * The id of this module
+ * 定义模块ID;
+ */
+#define FREG_HARDWARE_MODULE_ID &quot;freg&quot;
+
+/**
+ * The id of this device
+ * 定义设备ID;
+ */
+#define FREG_HARDWARE_DEVICE_ID &quot;freg&quot;
+
+/* 自定义模块结构体 */
+struct freg_module_t {
+    struct hw_module_t common;
+};
+
+/* 自定义设备结构体 */
+struct freg_device_t {
+    struct hw_device_t common;
+    int fd; // 文件描述符，用来描述打开的设备文件/dev/freg;
+    int (*set_val)(struct freg_device_t* dev, int val); // 写虚拟硬件设备freg的寄存器val的内容;
+    int (*get_val)(struct freg_device_t* dev, int* val);// 读虚拟硬件设备freg的寄存器val的内容;
+};
+
+__END_DECLS
+
+#endif
+</code></pre>
+<h3 id="fregcpp">freg.cpp</h3>
+<p>文件路径: 2.3.1_r1/hardware/libhardware/modules/freg/freg.cpp</p>
+<pre><code class="language-c++">#define LOG_TAG &quot;FregHALStub&quot;
+
+#include &lt;hardware/hardware.h&gt;
+#include &lt;hardware/freg.h&gt;
+
+#include &lt;fcntl.h&gt;
+#include &lt;errno.h&gt;
+
+#include &lt;cutils/log.h&gt;
+#include &lt;cutils/atomic.h&gt;
+
+#define DEVICE_NAME &quot;/dev/freg&quot;
+#define MODULE_NAME &quot;Freg&quot;
+#define MODULE_AUTHOR &quot;shyluo@gmail.com&quot;
+
+/* 设备打开和关闭接口 */
+static int freg_device_open(const struct hw_module_t* module, const char* id, struct hw_device_t** device);
+static int freg_device_close(struct hw_device_t* device);
+
+/* 设备寄存器读写接口 */
+static int freg_set_val(struct freg_device_t* dev, int val);
+static int freg_get_val(struct freg_device_t* dev, int* val);
+
+/* 定义模块操作方法结构体变量 */
+static struct hw_module_methods_t freg_module_methods = {
+    open: freg_device_open
+};
+
+/* 定义模块结构体变量 */
+struct freg_module_t HAL_MODULE_INFO_SYM = {
+    common: {
+        tag: HARDWARE_MODULE_TAG,  
+        version_major: 1,
+        version_minor: 0,
+        id: FREG_HARDWARE_MODULE_ID,
+        name: MODULE_NAME,
+        author: MODULE_AUTHOR,
+        methods: &amp;freg_module_methods,
+    }
+};
+
+/* 虚拟硬件设备freg的打开函数 */
+static int freg_device_open(const struct hw_module_t* module, const char* id, struct hw_device_t** device) {
+    /* 一个硬件抽象层模块可能会包含多个硬件设备，而这些硬件设备根据传递进来的参数id来判断要打开哪一个硬件设备。 */
+    if(!strcmp(id, FREG_HARDWARE_DEVICE_ID)) {
+        struct freg_device_t* dev;
+
+        /*  为设备分配一个 freg_device_t 结构体，并进行初始化;
+            初始化包括虚拟硬件设备freg的关闭函数，读写函数；
+        */
+        dev = (struct freg_device_t*)malloc(sizeof(struct freg_device_t));
+        if(!dev) {
+            LOGE(&quot;Failed to alloc space for freg_device_t.&quot;);
+            return -EFAULT;
+        }
+
+        memset(dev, 0, sizeof(struct freg_device_t));
+
+        dev-&gt;common.tag = HARDWARE_DEVICE_TAG;
+        dev-&gt;common.version = 0;
+        dev-&gt;common.module = (hw_module_t*)module;
+        dev-&gt;common.close = freg_device_close;
+        dev-&gt;set_val = freg_set_val;
+        dev-&gt;get_val = freg_get_val;
+   
+        if((dev-&gt;fd = open(DEVICE_NAME, O_RDWR)) == -1) {
+            LOGE(&quot;Failed to open device file /dev/freg -- %s.&quot;, strerror(errno));
+            free(dev);
+            return -EFAULT;
+        }
+
+        *device = &amp;(dev-&gt;common);
+
+        LOGI(&quot;Open device file /dev/freg successfully.&quot;);  
+
+        return 0;
+    }
+
+    return -EFAULT;
+}
+
+/* 虚拟硬件设备freg的关闭函数 */
+static int freg_device_close(struct hw_device_t* device) {
+    struct freg_device_t* freg_device = (struct freg_device_t*)device;
+    if(freg_device) {
+        /* 关闭设备文件 /dev/freg, 以及释放设备在打开时所分配的资源; */
+        close(freg_device-&gt;fd);
+        free(freg_device);
+    }
+
+    return 0;
+}
+
+/* 虚拟硬件设备freg的写函数，调用write */
+static int freg_set_val(struct freg_device_t* dev, int val) {
+    if(!dev) {
+        LOGE(&quot;Null dev pointer.&quot;);
+        return -EFAULT;
+    }
+
+    LOGI(&quot;Set value %d to device file /dev/freg.&quot;, val);
+    write(dev-&gt;fd, &amp;val, sizeof(val));
+
+    return 0;
+}
+
+/* 虚拟硬件设备freg的读函数，调用read */
+static int freg_get_val(struct freg_device_t* dev, int* val) {
+    if(!dev) {
+        LOGE(&quot;Null dev pointer.&quot;);
+        return -EFAULT;
+    }
+   
+    if(!val) {
+        LOGE(&quot;Null val pointer.&quot;);
+        return -EFAULT;
+    }
+
+    read(dev-&gt;fd, val, sizeof(*val));
+
+    LOGI(&quot;Get value %d from device file /dev/freg.&quot;, *val);
+
+    return 0;
+}
+</code></pre>
+<h3 id="androidmk">Android.mk</h3>
+<p>文件路径: 2.3.1_r1/hardware/libhardware/modules/freg/Android.mk</p>
+<pre><code class="language-makefile">LOCAL_PATH := $(call my-dir)
+include $(CLEAR_VARS)
+LOCAL_MODULE_TAGS := optional
+LOCAL_PRELINK_MODULE := false
+LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
+LOCAL_SHARED_LIBRARIES := liblog
+LOCAL_SRC_FILES := freg.cpp
+LOCAL_MODULE := freg.default
+include $(BUILD_SHARED_LIBRARY)
+</code></pre>
+<p>Android.mk是硬件抽象层模块freg的编译脚本文件，最后一行的include命令参数为: $(BUILD_SHARED_LIBRARY) 表示要将该硬件抽象层模块编译成一个动态链接库文件，名称为 freg.default，并且保存在 $(TARGET_OUT_SHARED_LIBRARIES)/hw 目录下，即 out/target/product/generic/system/lib/hw 目录下。</p>
+<h3 id="编译打包">编译&amp;打包</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./hardware/libhardware/modules/freg
+
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1'
+target thumb C++: freg.default &lt;= hardware/libhardware/modules/freg/freg.cpp
+hardware/libhardware/modules/freg/freg.cpp:40: warning: missing initializer for member 'hw_module_t::dso'
+hardware/libhardware/modules/freg/freg.cpp:40: warning: missing initializer for member 'hw_module_t::reserved'
+target SharedLib: freg.default (out/target/product/generic/obj/SHARED_LIBRARIES/freg.default_intermediates/LINKED/freg.default.so)
+target Non-prelinked: freg.default (out/target/product/generic/symbols/system/lib/hw/freg.default.so)
+target Strip: freg.default (out/target/product/generic/obj/lib/freg.default.so)
+Install: out/target/product/generic/system/lib/hw/freg.default.so
+make: Leaving directory `/home/dt/2.3.1_r1'
+</code></pre>
+<p>从mmm命令执行的输出信息中，可以看到输出文件为: out/target/product/generic/system/lib/hw/freg.default.so</p>
+<h2 id="233硬件抽象层模块的加载过程_分析">2.3.3，硬件抽象层模块的加载过程_分析</h2>
+<p>ndroid系统中的硬件层模块是由系统统一加载的，当调用者需要加载这些模块时，只要指定它们的ID值就可以了。在Android硬件抽象层中，负责加载硬件抽象层模块的函数是 hw_get_module，它的原型如下：</p>
+<pre><code class="language-C++">// hardware/libhardware/include/hardware/hardware.h
+
+/**
+ * Get the module info associated with a module by id.
+ * @return: 0 == success, &lt;0 == error and *pHmi == NULL
+ */
+int hw_get_module(const char *id, const struct hw_module_t **module);
+
+/* hw_get_module 有id和module两个参数，其中，id是输入参数，表示要加载的硬件抽象层模块ID；
+  module是输出参数，如果加载成功，那么它指向一个自定义的硬件抽象层模块结构体。函数的返回值是
+  一个整数，如果等于0，则表示加载成功；如果小于0，则表示加载失败。
+*/
+</code></pre>
+<h3 id="hw_get_module函数实现">hw_get_module函数实现:</h3>
+<pre><code class="language-C++">// hardware/libhardware/hardware.c
+
+/*
+ * Copyright (C) 2008 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include &lt;hardware/hardware.h&gt;
+
+#include &lt;cutils/properties.h&gt;
+
+#include &lt;dlfcn.h&gt;
+#include &lt;string.h&gt;
+#include &lt;pthread.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;limits.h&gt;
+
+#define LOG_TAG &quot;HAL&quot;
+#include &lt;utils/Log.h&gt;
+
+/** Base path of the hal modules */
+// 定要要加载的硬件抽象层模块文件所在的目录;（用来保存设备厂商所提供的硬件抽象层模块接口文件）
+#define HAL_LIBRARY_PATH1 &quot;/system/lib/hw&quot;
+#define HAL_LIBRARY_PATH2 &quot;/vendor/lib/hw&quot;
+
+/**
+ * There are a set of variant filename for modules. The form of the filename
+ * is &quot;&lt;MODULE_ID&gt;.variant.so&quot; so for the led module the Dream variants
+ * of base &quot;ro.product.board&quot;, &quot;ro.board.platform&quot; and &quot;ro.arch&quot; would be:
+ *
+ * led.trout.so
+ * led.msm7k.so
+ * led.ARMV6.so
+ * led.default.so
+ */
+// variant_keys 用来组装要加载的硬件抽象层模块的文件名称;
+static const char *variant_keys[] = {
+    &quot;ro.hardware&quot;,  /* This goes first so that it can pick up a different
+                       file on the emulator. */
+    &quot;ro.product.board&quot;,
+    &quot;ro.board.platform&quot;,
+    &quot;ro.arch&quot;
+};
+
+// HAL_VARIANT_KEYS_COUNT 表示数组 variant_keys 的大小;
+static const int HAL_VARIANT_KEYS_COUNT =
+    (sizeof(variant_keys)/sizeof(variant_keys[0]));
+
+/**
+ * Load the file defined by the variant and if successful
+ * return the dlopen handle and the hmi.
+ * @return 0 = success, !0 = failure.
+ */
+static int load(const char *id,
+        const char *path,
+        const struct hw_module_t **pHmi)
+{
+    int status;
+    void *handle;
+    struct hw_module_t *hmi;
+
+    /*
+     * load the symbols resolving undefined symbols before
+     * dlopen returns. Since RTLD_GLOBAL is not or'd in with
+     * RTLD_NOW the external symbols will not be global
+     */
+     // 硬件抽象层模块文件实际上是一个动态链接库文件，即so文件;
+     // 调用dlopen函数将它加载到内存中;
+    handle = dlopen(path, RTLD_NOW);
+    if (handle == NULL) {
+        char const *err_str = dlerror();
+        LOGE(&quot;load: module=%s\n%s&quot;, path, err_str?err_str:&quot;unknown&quot;);
+        status = -EINVAL;
+        goto done;
+    }
+
+    /* Get the address of the struct hal_module_info. */
+    const char *sym = HAL_MODULE_INFO_SYM_AS_STR;
+    // 使用dlsym函数来获得动态库里面名称为 HAL_MODULE_INFO_SYM_AS_STR 的符号;
+    // 这个 HAL_MODULE_INFO_SYM_AS_STR 符号指向的是一个自定义的硬件抽象层模块结构体;
+    // 它包含了对应的硬件抽象层模块的所有信息;
+    // 下面这行可以安全地将模块中的 HMI 符号转换为一个 hw_module_t 结构体指针;
+    hmi = (struct hw_module_t *)dlsym(handle, sym);
+    if (hmi == NULL) {
+        LOGE(&quot;load: couldn't find symbol %s&quot;, sym);
+        status = -EINVAL;
+        goto done;
+    }
+
+    /* Check that the id matches */
+    // 验证加载的硬件抽象层模块ID;
+    if (strcmp(id, hmi-&gt;id) != 0) {
+        LOGE(&quot;load: id=%s != hmi-&gt;id=%s&quot;, id, hmi-&gt;id);
+        status = -EINVAL;
+        goto done;
+    }
+
+    // 将成功加载后得到的模块句柄值handle保存在 hw_moduel_t 结构体指针 hmi 的成员变量 dso 中;
+    hmi-&gt;dso = handle;
+
+    /* success */
+    status = 0;
+
+    done:
+    if (status != 0) {
+        hmi = NULL;
+        if (handle != NULL) {
+            dlclose(handle);
+            handle = NULL;
+        }
+    } else {
+        LOGV(&quot;loaded HAL id=%s path=%s hmi=%p handle=%p&quot;,
+                id, path, *pHmi, handle);
+    }
+
+    *pHmi = hmi;
+
+    return status;
+}
+
+int hw_get_module(const char *id, const struct hw_module_t **module)
+{
+    int status;
+    int i;
+    const struct hw_module_t *hmi = NULL;
+    char prop[PATH_MAX];
+    char path[PATH_MAX];
+
+    /*
+     * Here we rely on the fact that calling dlopen multiple times on
+     * the same .so will simply increment a refcount (and not load
+     * a new copy of the library).
+     * We also assume that dlopen() is thread-safe.
+     */
+
+    /* Loop through the configuration variants looking for a module */
+    // 遍历 HAL_LIBRARY_PATH1 和 HAL_LIBRARY_PATH2 目录中检查对应的硬件抽象层模块文件是否存在;
+    for (i=0 ; i&lt;HAL_VARIANT_KEYS_COUNT+1 ; i++) {
+        if (i &lt; HAL_VARIANT_KEYS_COUNT) {
+            if (property_get(variant_keys[i], prop, NULL) == 0) {
+                continue;
+            }
+
+            snprintf(path, sizeof(path), &quot;%s/%s.%s.so&quot;,
+                    HAL_LIBRARY_PATH1, id, prop);
+            if (access(path, R_OK) == 0) break;
+
+            snprintf(path, sizeof(path), &quot;%s/%s.%s.so&quot;,
+                     HAL_LIBRARY_PATH2, id, prop);
+            if (access(path, R_OK) == 0) break;
+        } else {
+            snprintf(path, sizeof(path), &quot;%s/%s.default.so&quot;,
+                     HAL_LIBRARY_PATH1, id);
+            if (access(path, R_OK) == 0) break;
+        }
+    }
+
+    status = -ENOENT;
+    if (i &lt; HAL_VARIANT_KEYS_COUNT+1) {
+        /* load the module, if this fails, we're doomed, and we should not try
+         * to load a different variant. */
+         // 调用load函数来执行加载硬件抽象层模块的操作;
+        status = load(id, path, module);
+    }
+
+    return status;
+}
+
+</code></pre>
+<p>硬件抽象层模块文件实际上是一个动态链接库文件，即so文件;</p>
+<p>调用dlopen函数将它加载到内存中，使用dlsym函数来获得动态库里面名称为 HAL_MODULE_INFO_SYM_AS_STR 的符号，这个 HAL_MODULE_INFO_SYM_AS_STR 符号指向的是一个自定义的硬件抽象层模块结构体，然后转换为一个 hw_module_t 结构体指针，最后将成功加载后得到的模块句柄值handle保存在 hw_moduel_t 结构体指针 hmi 的成员变量 dso 中;</p>
+<h2 id="234处理硬件设备访问权限问题_配置">2.3.4，处理硬件设备访问权限问题_配置</h2>
+<p>在默认情况下，只有 root 用户才有权限访问系统的设备文件。由于一般的应用程序是没有 root 用户权限，所以如何赋予 root 之外的其他用户访问设备文件 /dev/freg 权限，就成了一个问题。</p>
+<p>在Linux系统中，可以通过 udev 规则在系统启动时修改设备文件的访问权限；在 Android系统中，不是用 udev规则，而是在 system/core/rootdir 目录下有一个 ueventd.rc 的配置文件来配置，我们通过增加如下一行内容来修改设备文件 /dev/freg 的访问权限：</p>
+<pre><code class="language-makefile">/dev/freg    0666    root    root
+</code></pre>
+<p>这表示所有的用户均可以访问设备文件 /dev/freg，即可以打开设备文件 /dev/freg，以及读写它的内容。</p>
+<p>在修改该文件后，需要重新编译Android源代码工厂，生成新的 ramdisk.img 镜像文件。</p>
+<h1 id="24开发android硬件访问服务_binder服务">2.4，开发Android硬件访问服务_Binder服务</h1>
+<p>开发好硬件抽象层模块之后，可以为应用程序提供硬件读写操作。由于硬件抽象层模块是使用C++语言开发的，而应用程序框架层中的硬件访问服务是使用 Java 语言开发的，因此，硬件访问服务必须通过 Java 本地接口（Java Native Interface，JNI）来调用硬件抽象层模块的接口。</p>
+<p>Android系统的硬件访问服务通常运行在系统进程 System 中，而使用这些硬件访问服务的应用程序运行在另外的进程中，即应用程序需要通过进程间通信机制来访问这些硬件访问服务。Android中采用 Binder 进程间通信机制，让应用程序能够跨进程访问系统进程System中的硬件访问服务。</p>
+<p>Binder 进程间通信机制要求提供服务的一方必须实现一个具有跨进程访问能力的服务接口，以便使用服务的一方可以通过这个服务接口来访问它。因此，在实现硬件访问服务之前，我们首先要定义它的服务接口。</p>
+<h2 id="241定义硬件访问服务接口_binder服务接口">2.4.1，定义硬件访问服务接口_Binder服务接口</h2>
+<p>binder服务接口，可以理解为跨进程提供的服务接口API声明；</p>
+<h3 id="ifregserviceaidl">IFregService.aidl</h3>
+<p>文件路径: frameworks/base/core/java/android/os/IFregService.aidl</p>
+<pre><code class="language-java">package android.os;
+
+interface IFregService {
+    // setVal 用来往虚拟硬件设备freg的寄存器val中写入一个整数;
+    void setVal(int val);
+    // getVal 用来从虚拟硬件设备freg的寄存器val中读出一个整数;
+    int getVal();
+
+}
+</code></pre>
+<p>aidl 定义的服务接口文件，通过编译脚本文件的声明，在编译时，编译系统会将它们转换成 Java 文件，然后再对它们进行编译。</p>
+<p>我们修改编译脚本文件的声明:</p>
+<h3 id="androidmk-2">Android.mk</h3>
+<p>文件路径: frameworks/base/Android.mk</p>
+<p>添加一行，将我们的 IFregService.aidl 文件加入到 LOCAL_SRC_FILES，让编译器识别到。</p>
+<pre><code class="language-makefile">LOCAL_SRC_FILES += \
+    ......
+    core/java/android/os/IRemoteCallback.aidl \
+    core/java/android/os/IVibratorService.aidl \
+    core/java/android/os/IFregService.aidl \
+</code></pre>
+<h3 id="编译">编译</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./frameworks/base/
+
+make: Entering directory `/home/dt/2.3.1_r1`
+Aidl: framework &lt;= frameworks/base/core/java/android/os/IFregService.aidl
+Copying: out/target/common/obj/JAVA_LIBRARIES/ext_intermediates/emma_out/lib/classes-jarjar.jar
+target Java: framework (out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/classes)
+out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/src/core/java/android/os/IFregService.java:80: warning: unmappable character for encoding ascii
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+100 warnings
+Copying: out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/classes-jarjar.jar
+Copying: out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/emma_out/lib/classes-jarjar.jar
+Copying: out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/classes.jar
+Copying: out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/noproguard.classes.jar
+target Dex: framework
+Copying: out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/noproguard.classes.dex
+target Jar: framework (out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/javalib.jar)
+ 'out/target/common/obj/JAVA_LIBRARIES/framework_intermediates//classes.dex' as 'classes.dex'...
+Install: out/target/product/generic/system/framework/framework.jar
+make: Leaving directory `/home/dt/2.3.1_r1'
+</code></pre>
+<p>通过编译日志，可以看到输出的java文件为：out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/src/core/java/android/os/IFregService.java</p>
+<h3 id="ifregservicejava_编译自动生成">IFregService.java_编译自动生成</h3>
+<p>该文件是编译器依据我们写的IFregService.aidl文件自动生成的，我们打开看看：</p>
+<p>文件路径：out/target/common/obj/JAVA_LIBRARIES/framework_intermediates/src/core/java/android/os/IFregService.java</p>
+<pre><code class="language-java">/*
+ * This file is auto-generated.  DO NOT MODIFY.
+ * Original file: frameworks/base/core/java/android/os/IFregService.aidl
+ */
+package android.os;
+
+public interface IFregService extends android.os.IInterface {
+    /** Local-side IPC implementation stub class. */
+    public static abstract class Stub extends android.os.Binder implements android.os.IFregService {
+        private static final java.lang.String DESCRIPTOR = &quot;android.os.IFregService&quot;;
+
+        /** Construct the stub at attach it to the interface. */
+        public Stub() {
+            this.attachInterface(this, DESCRIPTOR);
+        }
+
+        /**
+         * Cast an IBinder object into an android.os.IFregService interface,
+         * generating a proxy if needed.
+         */
+        public static android.os.IFregService asInterface(android.os.IBinder obj) {
+            if ((obj == null)) {
+                return null;
+            }
+            android.os.IInterface iin = (android.os.IInterface) obj.queryLocalInterface(DESCRIPTOR);
+            if (((iin != null) &amp;&amp; (iin instanceof android.os.IFregService))) {
+                return ((android.os.IFregService) iin);
+            }
+            return new android.os.IFregService.Stub.Proxy(obj);
+        }
+
+        public android.os.IBinder asBinder() {
+            return this;
+        }
+
+        @Override
+        public boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags)
+                throws android.os.RemoteException {
+            switch (code) {
+                case INTERFACE_TRANSACTION: {
+                    reply.writeString(DESCRIPTOR);
+                    return true;
+                }
+                case TRANSACTION_setVal: {
+                    data.enforceInterface(DESCRIPTOR);
+                    int _arg0;
+                    _arg0 = data.readInt();
+                    this.setVal(_arg0);
+                    reply.writeNoException();
+                    return true;
+                }
+                case TRANSACTION_getVal: {
+                    data.enforceInterface(DESCRIPTOR);
+                    int _result = this.getVal();
+                    reply.writeNoException();
+                    reply.writeInt(_result);
+                    return true;
+                }
+            }
+            return super.onTransact(code, data, reply, flags);
+        }
+
+        private static class Proxy implements android.os.IFregService {
+            private android.os.IBinder mRemote;
+
+            Proxy(android.os.IBinder remote) {
+                mRemote = remote;
+            }
+
+            public android.os.IBinder asBinder() {
+                return mRemote;
+            }
+
+            public java.lang.String getInterfaceDescriptor() {
+                return DESCRIPTOR;
+            }
+            // setVal 用来往虚拟硬件设备freg的寄存器val中写入一个整数;
+
+            public void setVal(int val) throws android.os.RemoteException {
+                android.os.Parcel _data = android.os.Parcel.obtain();
+                android.os.Parcel _reply = android.os.Parcel.obtain();
+                try {
+                    _data.writeInterfaceToken(DESCRIPTOR);
+                    _data.writeInt(val);
+                    mRemote.transact(Stub.TRANSACTION_setVal, _data, _reply, 0);
+                    _reply.readException();
+                } finally {
+                    _reply.recycle();
+                    _data.recycle();
+                }
+            }
+            // getVal 用来从虚拟硬件设备freg的寄存器val中读出一个整数;
+
+            public int getVal() throws android.os.RemoteException {
+                android.os.Parcel _data = android.os.Parcel.obtain();
+                android.os.Parcel _reply = android.os.Parcel.obtain();
+                int _result;
+                try {
+                    _data.writeInterfaceToken(DESCRIPTOR);
+                    mRemote.transact(Stub.TRANSACTION_getVal, _data, _reply, 0);
+                    _reply.readException();
+                    _result = _reply.readInt();
+                } finally {
+                    _reply.recycle();
+                    _data.recycle();
+                }
+                return _result;
+            }
+        }
+
+        static final int TRANSACTION_setVal = (android.os.IBinder.FIRST_CALL_TRANSACTION + 0);
+        static final int TRANSACTION_getVal = (android.os.IBinder.FIRST_CALL_TRANSACTION + 1);
+    }
+  
+    // setVal 用来往虚拟硬件设备freg的寄存器val中写入一个整数;
+    public void setVal(int val) throws android.os.RemoteException;
+  
+    // getVal 用来从虚拟硬件设备freg的寄存器val中读出一个整数;
+    public int getVal() throws android.os.RemoteException;
+}
+</code></pre>
+<p>编译后得到的 framework.jar 文件就包含有 IFregService 接口，它继承了 android.os.IInterface 接口。在 IFregService 接口内部，定义了一个 Binder 本地对象类 Stub，它实现了 IFregService接口，并且继承了 android.os.Binder 类。此外，在 IFregService.Stub 类内部，还定义来一个 Binder 代理对象类 Proxy，它同样也实现了 IFregService 接口。</p>
+<p>用 AIDL 定义的服务接口是用来进行进程间通信的，其中，提供服务的进程成为 Server 进程，而使用服务的进程成为 Client 进程。在 Server 进程中，每一个服务都对应有一个 Binder 本地对象，它通过一个桩（ Stub ）来等待 Client 进程发送进程间通信请求。Client 进程在访问运行 Server 进程中的服务之前，首先要获得它的一个 Binder 代理对象（Proxy），然后通过这个 Binder 代理对象接口向它发送进程间通信请求。</p>
+<h2 id="242实现硬件访问服务_binder服务java实现类">2.4.2，实现硬件访问服务_Binder服务Java实现类</h2>
+<h3 id="fregservicejava">FregService.java</h3>
+<p>文件路径：frameworks/base/services/java/com/android/server/FregService.java</p>
+<p>硬件访问服务实现类 FregService 从 IFregService.Stub 类继承下来，并且实现 IFregService 接口的成员函数 setVal 和 getVal。</p>
+<pre><code class="language-java">package com.android.server;
+
+import android.content.Context;
+import android.os.IFregService;
+import android.util.Slog;
+
+/* FregService 继承上一步，系统编译AIDL自动生成的抽象类 IFregService.Stub */
+public class FregService extends IFregService.Stub {
+    private static final String TAG = &quot;FregService&quot;;
+
+    private int mPtr = 0;
+
+    FregService() {
+        // 调用 init_native 来打开虚拟硬件设备freg，并获得它的一个句柄值，保存在 mPtr 中;
+        mPtr = init_native();
+
+        if (mPtr == 0) {
+            // 如果句柄值为0，则判定为打开虚拟硬件设备freg失败;
+            Slog.e(TAG, &quot;Failed to initialize freg service.&quot;);
+        }
+    }
+
+    public void setVal(int val) {
+        if (mPtr == 0) {
+            Slog.e(TAG, &quot;Freg service is not initialized.&quot;);
+            return;
+        }
+
+        // 调用 JNI 方法 setVal_native 来写虚拟硬件设备 freg 的寄存器val;
+        // 传入 mPtr，即虚拟硬件设备freg的句柄值，确认访问哪一个硬件设备;
+        setVal_native(mPtr, val);
+    }
+
+    public int getVal() {
+        if (mPtr == 0) {
+            Slog.e(TAG, &quot;Freg service is not initialized.&quot;);
+            return 0;
+        }
+
+        // 调用 JNI 方法 getVal_native 来读虚拟硬件设备 freg 的寄存器val;
+        // 传入 mPtr，即虚拟硬件设备freg的句柄值，确认访问哪一个硬件设备;
+        return getVal_native(mPtr);
+    }
+
+    private static native int init_native();
+
+    private static native void setVal_native(int ptr, int val);
+
+    private static native int getVal_native(int ptr);
+};
+</code></pre>
+<h3 id="编译-2">编译</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./frameworks/base/services/java/
+
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1`
+target Java: services (out/target/common/obj/JAVA_LIBRARIES/services_intermediates/classes)
+frameworks/base/services/java/com/android/server/FregService.java:13: warning: unmappable character for encoding ascii
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+100 warnings
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/classes-jarjar.jar
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/emma_out/lib/classes-jarjar.jar
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/classes.jar
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/noproguard.classes.jar
+target Dex: services
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/noproguard.classes.dex
+target Jar: services (out/target/common/obj/JAVA_LIBRARIES/services_intermediates/javalib.jar)
+ 'out/target/common/obj/JAVA_LIBRARIES/services_intermediates//classes.dex' as 'classes.dex'...
+Install: out/target/product/generic/system/framework/services.jar
+make: Leaving directory `/home/dt/2.3.1_r1'
+</code></pre>
+<p>编译后得到的 service.jar 文件就包含有 FregService 类。</p>
+<h2 id="243实现硬件访问服务的jni方法_binder服务c实现">2.4.3，实现硬件访问服务的JNI方法_Binder服务C++实现</h2>
+<h3 id="com_android_server_fregservicecpp">com_android_server_FregService.cpp</h3>
+<p>文件路径: frameworks/base/services/jni/com_android_server_FregService.cpp</p>
+<pre><code class="language-C++">#define LOG_TAG &quot;FregServiceJNI&quot;
+
+#include &quot;jni.h&quot;
+#include &quot;JNIHelp.h&quot;
+#include &quot;android_runtime/AndroidRuntime.h&quot;
+
+#include &lt;utils/misc.h&gt;
+#include &lt;utils/Log.h&gt;
+#include &lt;hardware/hardware.h&gt;
+#include &lt;hardware/freg.h&gt;
+
+#include &lt;stdio.h&gt;
+
+namespace android
+{
+    /* 设置虚拟硬件设备freg的寄存器的值 */
+    static void freg_setVal(JNIEnv* env, jobject clazz, jint ptr, jint value) {
+        /* 将参数ptr转换为 freg_device_t 结构体变量 */
+        freg_device_t* device = (freg_device_t*)ptr;
+        if(!device) {
+            LOGE(&quot;Device freg is not open.&quot;);
+            return;
+        }
+   
+        int val = value;
+
+        LOGI(&quot;Set value %d to device freg.&quot;, val);
+       
+        device-&gt;set_val(device, val);
+    }
+
+    /* 读取虚拟硬件设备freg的寄存器的值 */
+    static jint freg_getVal(JNIEnv* env, jobject clazz, jint ptr) {
+        /* 将参数 ptr 转换为 freg_device_t 结构体变量 */
+        freg_device_t* device = (freg_device_t*)ptr;
+        if(!device) {
+            LOGE(&quot;Device freg is not open.&quot;);
+            return 0;
+        }
+
+        int val = 0;
+
+        device-&gt;get_val(device, &amp;val);
+       
+        LOGI(&quot;Get value %d from device freg.&quot;, val);
+   
+        return val;
+    }
+
+    /* 打开虚拟硬件设备freg */
+    static inline int freg_device_open(const hw_module_t* module, struct freg_device_t** device) {
+        return module-&gt;methods-&gt;open(module, FREG_HARDWARE_DEVICE_ID, (struct hw_device_t**)device);
+    }
+   
+    /* 初始化虚拟硬件设备 freg */
+    static jint freg_init(JNIEnv* env, jclass clazz) {
+        freg_module_t* module;
+        freg_device_t* device;
+       
+        LOGI(&quot;Initializing HAL stub freg......&quot;);
+
+        /* 加载硬件抽象层模块 freg */
+        if(hw_get_module(FREG_HARDWARE_MODULE_ID, (const struct hw_module_t**)&amp;module) == 0) {
+            LOGI(&quot;Device freg found.&quot;);
+            /* 打开虚拟硬件设备freg */
+            if(freg_device_open(&amp;(module-&gt;common), &amp;device) == 0) {
+                LOGI(&quot;Device freg is open.&quot;);
+                // 获得 freg_device_t 接口，转换成一个整数句柄值，返回;
+                return (jint)device;
+            }
+
+            LOGE(&quot;Failed to open device freg.&quot;);
+            return 0;
+        }
+
+        LOGE(&quot;Failed to get HAL stub freg.&quot;);
+
+        return 0;      
+    }
+
+    /* Java本地接口方法表 */
+    static const JNINativeMethod method_table[] = {
+        {&quot;init_native&quot;, &quot;()I&quot;, (void*)freg_init},
+        {&quot;setVal_native&quot;, &quot;(II)V&quot;, (void*)freg_setVal},
+        {&quot;getVal_native&quot;, &quot;(I)I&quot;, (void*)freg_getVal},
+    };
+
+    /* 注册Java本地接口方法 */
+    // 该函数需要加入到 onload.cpp 中的 JNI_OnLoad 函数中调用，这样当系统加载时，就将JNI注册到Java虚拟机中;
+    int register_android_server_FregService(JNIEnv *env) {
+        // jniRegisterNativeMethods 函数把 JNI 方发表 method_table 注册到 Java 虚拟机中，这样 Java 函数就可以调用注册表中的函数了。
+        return jniRegisterNativeMethods(env, &quot;com/android/server/FregService&quot;, method_table, NELEM(method_table));
+    }
+};
+</code></pre>
+<p>硬件访问服务 FregService 的 JNI 方法（即：com_android_server_FregService.cpp 文件）编写完成之后，我们还需要修改 frameworks/base/services/jni/onload.cpp 文件，在JNI_OnLoad函数里面增加 register_android_server_FregService 函数的调用，这样当系统加载时，就将freg模块的JNI接口注册到Java虚拟机中了。</p>
+<h3 id="onloadcpp">onload.cpp</h3>
+<p>文件路径：frameworks/base/services/jni/onload.cpp</p>
+<pre><code class="language-C++">#include &quot;JNIHelp.h&quot;
+#include &quot;jni.h&quot;
+#include &quot;utils/Log.h&quot;
+#include &quot;utils/misc.h&quot;
+
+namespace android {
+    int register_android_server_AlarmManagerService(JNIEnv* env);
+    int register_android_server_BatteryService(JNIEnv* env);
+    int register_android_server_InputManager(JNIEnv* env);
+    int register_android_server_LightsService(JNIEnv* env);
+    int register_android_server_PowerManagerService(JNIEnv* env);
+    int register_android_server_UsbService(JNIEnv* env);
+    int register_android_server_VibratorService(JNIEnv* env);
+    int register_android_server_SystemServer(JNIEnv* env);
+    int register_android_server_location_GpsLocationProvider(JNIEnv* env);
+    // 新增 freg 注册函数的声明;
+    int register_android_server_FregService(JNIEnv* env);
+};
+
+using namespace android;
+
+extern &quot;C&quot; jint JNI_OnLoad(JavaVM* vm, void* reserved)
+{
+    JNIEnv* env = NULL;
+    jint result = -1;
+
+    if (vm-&gt;GetEnv((void**) &amp;env, JNI_VERSION_1_4) != JNI_OK) {
+        LOGE(&quot;GetEnv failed!&quot;);
+        return result;
+    }
+    LOG_ASSERT(env, &quot;Could not retrieve the env!&quot;);
+
+    register_android_server_PowerManagerService(env);
+    register_android_server_InputManager(env);
+    register_android_server_LightsService(env);
+    register_android_server_AlarmManagerService(env);
+    register_android_server_BatteryService(env);
+    register_android_server_UsbService(env);
+    register_android_server_VibratorService(env);
+    register_android_server_SystemServer(env);
+    register_android_server_location_GpsLocationProvider(env);
+    // 新增 freg 注册函数的调用;
+    register_android_server_FregService(env);
+
+    return JNI_VERSION_1_4;
+}
+</code></pre>
+<p>onload.cpp 文件实现在 libandroid_servers 模块中。当系统加载 libandroid_servers 模块时，就会调用实现在 onload.cpp 文件中的 JNI_OnLoad 函数。这样，就可以将前面定义的三个 JNI 方法 init_native、setVal_native 和 getVal_native 注册到 Java 虚拟机中。</p>
+<p>我们还需要将 com_android_server_FregService.cpp 文件加入到 Android.mk 中，这样编译程序才能找到我们的源文件进行编译。</p>
+<h3 id="androidmk-3">Android.mk</h3>
+<p>文件路径：frameworks/base/services/jni/Android.mk</p>
+<pre><code class="language-makefile">LOCAL_PATH:= $(call my-dir)
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES:= \
+    com_android_server_AlarmManagerService.cpp \
+    com_android_server_BatteryService.cpp \
+    com_android_server_InputManager.cpp \
+    com_android_server_LightsService.cpp \
+    com_android_server_PowerManagerService.cpp \
+    com_android_server_SystemServer.cpp \
+    com_android_server_UsbService.cpp \
+    com_android_server_VibratorService.cpp \
+    com_android_server_location_GpsLocationProvider.cpp \
+    com_android_server_FregService.cpp \
+    onload.cpp
+
+LOCAL_C_INCLUDES += \
+    $(JNI_H_INCLUDE)
+
+LOCAL_SHARED_LIBRARIES := \
+    libandroid_runtime \
+    libcutils \
+    libhardware \
+    libhardware_legacy \
+    libnativehelper \
+    libsystem_server \
+    libutils \
+    libui \
+    libsurfaceflinger_client
+
+ifeq ($(TARGET_SIMULATOR),true)
+ifeq ($(TARGET_OS),linux)
+ifeq ($(TARGET_ARCH),x86)
+LOCAL_LDLIBS += -lpthread -ldl -lrt
+endif
+endif
+endif
+
+ifeq ($(WITH_MALLOC_LEAK_CHECK),true)
+    LOCAL_CFLAGS += -DMALLOC_LEAK_CHECK
+endif
+
+LOCAL_MODULE:= libandroid_servers
+
+include $(BUILD_SHARED_LIBRARY)
+</code></pre>
+<h3 id="编译-3">编译</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./frameworks/base/services/jni/
+
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1`
+target thumb C++: libandroid_servers &lt;= frameworks/base/services/jni/com_android_server_FregService.cpp
+target thumb C++: libandroid_servers &lt;= frameworks/base/services/jni/onload.cpp
+target SharedLib: libandroid_servers (out/target/product/generic/obj/SHARED_LIBRARIES/libandroid_servers_intermediates/LINKED/libandroid_servers.so)
+target Prelink: libandroid_servers (out/target/product/generic/symbols/system/lib/libandroid_servers.so)
+libelfcopy: Warning: Range lists in .debug_info section aren't in ascending order!
+libelfcopy: Warning: Range lists in .debug_ranges section start at 0x68
+target Strip: libandroid_servers (out/target/product/generic/obj/lib/libandroid_servers.so)
+Install: out/target/product/generic/system/lib/libandroid_servers.so
+make: Leaving directory `/home/dt/2.3.1_r1'
+</code></pre>
+<p>编译后得到的libandroid_servers.so文件就包含有init_native、setVal_native和getVal_native这三个JNI方法了。</p>
+<h2 id="244启动硬件访问服务_加入系统服务开机启动">2.4.4，启动硬件访问服务_加入系统服务,开机启动</h2>
+<p>Android系统的硬件访问服务通常是在系统进程 System 中启动的，而系统进程 System 是由应用程序孵化器进程 Zygote 负责启动的。由于应用程序孵化器进程 Zygote 是在系统启动时启动的，因此，把硬件访问服务运行在系统进程 System 中，就实现了开机时自动启动。</p>
+<p>接下来，我们通过修改 frameworks/base/services/java/com/android/server/SystemServer.java 文件，把我们写的硬件访问服务 FregServer 运行在系统进程 System 中。</p>
+<h3 id="systemserverjava">SystemServer.java</h3>
+<p>文件路径：frameworks/base/services/java/com/android/server/SystemServer.java</p>
+<p>操作：修改 ServerThread 类的成员函数 run 的实现。</p>
+<pre><code class="language-java">/*
+ * Copyright (C) 2006 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.android.server;
+
+import com.android.server.am.ActivityManagerService;
+import com.android.server.usb.UsbService;
+import com.android.internal.app.ShutdownThread;
+import com.android.internal.os.BinderInternal;
+import com.android.internal.os.SamplingProfilerIntegration;
+
+import dalvik.system.VMRuntime;
+import dalvik.system.Zygote;
+
+import android.app.ActivityManagerNative;
+import android.bluetooth.BluetoothAdapter;
+import android.content.ComponentName;
+import android.content.ContentResolver;
+import android.content.ContentService;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.IPackageManager;
+import android.database.ContentObserver;
+import android.database.Cursor;
+import android.media.AudioService;
+import android.os.Looper;
+import android.os.RemoteException;
+import android.os.ServiceManager;
+import android.os.StrictMode;
+import android.os.SystemClock;
+import android.os.SystemProperties;
+import android.provider.Contacts.People;
+import android.provider.Settings;
+import android.server.BluetoothA2dpService;
+import android.server.BluetoothService;
+import android.server.search.SearchManagerService;
+import android.util.EventLog;
+import android.util.Log;
+import android.util.Slog;
+import android.accounts.AccountManagerService;
+
+import java.io.File;
+import java.util.Timer;
+import java.util.TimerTask;
+
+class ServerThread extends Thread {
+    private static final String TAG = &quot;SystemServer&quot;;
+    private final static boolean INCLUDE_DEMO = false;
+
+    private static final int LOG_BOOT_PROGRESS_SYSTEM_RUN = 3010;
+
+    private ContentResolver mContentResolver;
+
+    private class AdbSettingsObserver extends ContentObserver {
+        public AdbSettingsObserver() {
+            super(null);
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            boolean enableAdb = (Settings.Secure.getInt(mContentResolver,
+                    Settings.Secure.ADB_ENABLED, 0) &gt; 0);
+            // setting this secure property will start or stop adbd
+            SystemProperties.set(&quot;persist.service.adb.enable&quot;, enableAdb ? &quot;1&quot; : &quot;0&quot;);
+        }
+    }
+
+    @Override
+    public void run() {
+        EventLog.writeEvent(EventLogTags.BOOT_PROGRESS_SYSTEM_RUN,
+                SystemClock.uptimeMillis());
+
+        Looper.prepare();
+
+        android.os.Process.setThreadPriority(
+                android.os.Process.THREAD_PRIORITY_FOREGROUND);
+
+        BinderInternal.disableBackgroundScheduling(true);
+        android.os.Process.setCanSelfBackground(false);
+
+        // Check whether we failed to shut down last time we tried.
+        {
+            final String shutdownAction = SystemProperties.get(
+                    ShutdownThread.SHUTDOWN_ACTION_PROPERTY, &quot;&quot;);
+            if (shutdownAction != null &amp;&amp; shutdownAction.length() &gt; 0) {
+                boolean reboot = (shutdownAction.charAt(0) == '1');
+
+                final String reason;
+                if (shutdownAction.length() &gt; 1) {
+                    reason = shutdownAction.substring(1, shutdownAction.length());
+                } else {
+                    reason = null;
+                }
+
+                ShutdownThread.rebootOrShutdown(reboot, reason);
+            }
+        }
+
+        String factoryTestStr = SystemProperties.get(&quot;ro.factorytest&quot;);
+        int factoryTest = &quot;&quot;.equals(factoryTestStr) ? SystemServer.FACTORY_TEST_OFF
+                : Integer.parseInt(factoryTestStr);
+
+        LightsService lights = null;
+        PowerManagerService power = null;
+        BatteryService battery = null;
+        ConnectivityService connectivity = null;
+        IPackageManager pm = null;
+        Context context = null;
+        WindowManagerService wm = null;
+        BluetoothService bluetooth = null;
+        BluetoothA2dpService bluetoothA2dp = null;
+        HeadsetObserver headset = null;
+        DockObserver dock = null;
+        UsbService usb = null;
+        UiModeManagerService uiMode = null;
+        RecognitionManagerService recognition = null;
+        ThrottleService throttle = null;
+
+        // Critical services...
+        try {
+            Slog.i(TAG, &quot;Entropy Service&quot;);
+            ServiceManager.addService(&quot;entropy&quot;, new EntropyService());
+
+            Slog.i(TAG, &quot;Power Manager&quot;);
+            power = new PowerManagerService();
+            ServiceManager.addService(Context.POWER_SERVICE, power);
+
+            Slog.i(TAG, &quot;Activity Manager&quot;);
+            context = ActivityManagerService.main(factoryTest);
+
+            Slog.i(TAG, &quot;Telephony Registry&quot;);
+            ServiceManager.addService(&quot;telephony.registry&quot;, new TelephonyRegistry(context));
+
+            AttributeCache.init(context);
+
+            Slog.i(TAG, &quot;Package Manager&quot;);
+            pm = PackageManagerService.main(context,
+                    factoryTest != SystemServer.FACTORY_TEST_OFF);
+
+            ActivityManagerService.setSystemProcess();
+
+            mContentResolver = context.getContentResolver();
+
+            // The AccountManager must come before the ContentService
+            try {
+                Slog.i(TAG, &quot;Account Manager&quot;);
+                ServiceManager.addService(Context.ACCOUNT_SERVICE,
+                        new AccountManagerService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Account Manager&quot;, e);
+            }
+
+            Slog.i(TAG, &quot;Content Manager&quot;);
+            ContentService.main(context,
+                    factoryTest == SystemServer.FACTORY_TEST_LOW_LEVEL);
+
+            Slog.i(TAG, &quot;System Content Providers&quot;);
+            ActivityManagerService.installSystemProviders();
+
+            Slog.i(TAG, &quot;Battery Service&quot;);
+            battery = new BatteryService(context);
+            ServiceManager.addService(&quot;battery&quot;, battery);
+
+            Slog.i(TAG, &quot;Lights Service&quot;);
+            lights = new LightsService(context);
+
+            Slog.i(TAG, &quot;Vibrator Service&quot;);
+            ServiceManager.addService(&quot;vibrator&quot;, new VibratorService(context));
+
+            // only initialize the power service after we have started the
+            // lights service, content providers and the battery service.
+            power.init(context, lights, ActivityManagerService.getDefault(), battery);
+
+            Slog.i(TAG, &quot;Alarm Manager&quot;);
+            AlarmManagerService alarm = new AlarmManagerService(context);
+            ServiceManager.addService(Context.ALARM_SERVICE, alarm);
+
+            Slog.i(TAG, &quot;Init Watchdog&quot;);
+            Watchdog.getInstance().init(context, battery, power, alarm,
+                    ActivityManagerService.self());
+
+            Slog.i(TAG, &quot;Window Manager&quot;);
+            wm = WindowManagerService.main(context, power,
+                    factoryTest != SystemServer.FACTORY_TEST_LOW_LEVEL);
+            ServiceManager.addService(Context.WINDOW_SERVICE, wm);
+
+            ((ActivityManagerService) ServiceManager.getService(&quot;activity&quot;))
+                    .setWindowManager(wm);
+
+            // Skip Bluetooth if we have an emulator kernel
+            // TODO: Use a more reliable check to see if this product should
+            // support Bluetooth - see bug 988521
+            if (SystemProperties.get(&quot;ro.kernel.qemu&quot;).equals(&quot;1&quot;)) {
+                Slog.i(TAG, &quot;Registering null Bluetooth Service (emulator)&quot;);
+                ServiceManager.addService(BluetoothAdapter.BLUETOOTH_SERVICE, null);
+            } else if (factoryTest == SystemServer.FACTORY_TEST_LOW_LEVEL) {
+                Slog.i(TAG, &quot;Registering null Bluetooth Service (factory test)&quot;);
+                ServiceManager.addService(BluetoothAdapter.BLUETOOTH_SERVICE, null);
+            } else {
+                Slog.i(TAG, &quot;Bluetooth Service&quot;);
+                bluetooth = new BluetoothService(context);
+                ServiceManager.addService(BluetoothAdapter.BLUETOOTH_SERVICE, bluetooth);
+                bluetooth.initAfterRegistration();
+                bluetoothA2dp = new BluetoothA2dpService(context, bluetooth);
+                ServiceManager.addService(BluetoothA2dpService.BLUETOOTH_A2DP_SERVICE,
+                        bluetoothA2dp);
+
+                int bluetoothOn = Settings.Secure.getInt(mContentResolver,
+                        Settings.Secure.BLUETOOTH_ON, 0);
+                if (bluetoothOn &gt; 0) {
+                    bluetooth.enable();
+                }
+            }
+
+        } catch (RuntimeException e) {
+            Slog.e(&quot;System&quot;, &quot;Failure starting core service&quot;, e);
+        }
+
+        DevicePolicyManagerService devicePolicy = null;
+        StatusBarManagerService statusBar = null;
+        InputMethodManagerService imm = null;
+        AppWidgetService appWidget = null;
+        NotificationManagerService notification = null;
+        WallpaperManagerService wallpaper = null;
+        LocationManagerService location = null;
+
+        if (factoryTest != SystemServer.FACTORY_TEST_LOW_LEVEL) {
+            try {
+                Slog.i(TAG, &quot;Device Policy&quot;);
+                devicePolicy = new DevicePolicyManagerService(context);
+                ServiceManager.addService(Context.DEVICE_POLICY_SERVICE, devicePolicy);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting DevicePolicyService&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Status Bar&quot;);
+                statusBar = new StatusBarManagerService(context);
+                ServiceManager.addService(Context.STATUS_BAR_SERVICE, statusBar);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting StatusBarManagerService&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Clipboard Service&quot;);
+                ServiceManager.addService(Context.CLIPBOARD_SERVICE,
+                        new ClipboardService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Clipboard Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Input Method Service&quot;);
+                imm = new InputMethodManagerService(context, statusBar);
+                ServiceManager.addService(Context.INPUT_METHOD_SERVICE, imm);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Input Manager Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;NetStat Service&quot;);
+                ServiceManager.addService(&quot;netstat&quot;, new NetStatService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting NetStat Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;NetworkManagement Service&quot;);
+                ServiceManager.addService(
+                        Context.NETWORKMANAGEMENT_SERVICE,
+                        NetworkManagementService.create(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting NetworkManagement Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Connectivity Service&quot;);
+                connectivity = ConnectivityService.getInstance(context);
+                ServiceManager.addService(Context.CONNECTIVITY_SERVICE, connectivity);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Connectivity Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Throttle Service&quot;);
+                throttle = new ThrottleService(context);
+                ServiceManager.addService(
+                        Context.THROTTLE_SERVICE, throttle);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting ThrottleService&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Accessibility Manager&quot;);
+                ServiceManager.addService(Context.ACCESSIBILITY_SERVICE,
+                        new AccessibilityManagerService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Accessibility Manager&quot;, e);
+            }
+
+            try {
+                /*
+                 * NotificationManagerService is dependant on MountService,
+                 * (for media / usb notifications) so we must start MountService first.
+                 */
+                Slog.i(TAG, &quot;Mount Service&quot;);
+                ServiceManager.addService(&quot;mount&quot;, new MountService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Mount Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Notification Manager&quot;);
+                notification = new NotificationManagerService(context, statusBar, lights);
+                ServiceManager.addService(Context.NOTIFICATION_SERVICE, notification);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Notification Manager&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Device Storage Monitor&quot;);
+                ServiceManager.addService(DeviceStorageMonitorService.SERVICE,
+                        new DeviceStorageMonitorService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting DeviceStorageMonitor service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Location Manager&quot;);
+                location = new LocationManagerService(context);
+                ServiceManager.addService(Context.LOCATION_SERVICE, location);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Location Manager&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Search Service&quot;);
+                ServiceManager.addService(Context.SEARCH_SERVICE,
+                        new SearchManagerService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Search Service&quot;, e);
+            }
+
+            if (INCLUDE_DEMO) {
+                Slog.i(TAG, &quot;Installing demo data...&quot;);
+                (new DemoThread(context)).start();
+            }
+
+            try {
+                Slog.i(TAG, &quot;DropBox Service&quot;);
+                ServiceManager.addService(Context.DROPBOX_SERVICE,
+                        new DropBoxManagerService(context, new File(&quot;/data/system/dropbox&quot;)));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting DropBoxManagerService&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Wallpaper Service&quot;);
+                wallpaper = new WallpaperManagerService(context);
+                ServiceManager.addService(Context.WALLPAPER_SERVICE, wallpaper);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Wallpaper Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Audio Service&quot;);
+                ServiceManager.addService(Context.AUDIO_SERVICE, new AudioService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Audio Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Headset Observer&quot;);
+                // Listen for wired headset changes
+                headset = new HeadsetObserver(context);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting HeadsetObserver&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Dock Observer&quot;);
+                // Listen for dock station changes
+                dock = new DockObserver(context, power);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting DockObserver&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;USB Service&quot;);
+                // Listen for USB changes
+                usb = new UsbService(context);
+                ServiceManager.addService(Context.USB_SERVICE, usb);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting UsbService&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;UI Mode Manager Service&quot;);
+                // Listen for UI mode changes
+                uiMode = new UiModeManagerService(context);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting UiModeManagerService&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Backup Service&quot;);
+                ServiceManager.addService(Context.BACKUP_SERVICE,
+                        new BackupManagerService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Backup Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;AppWidget Service&quot;);
+                appWidget = new AppWidgetService(context);
+                ServiceManager.addService(Context.APPWIDGET_SERVICE, appWidget);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting AppWidget Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;Recognition Service&quot;);
+                recognition = new RecognitionManagerService(context);
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Recognition Service&quot;, e);
+            }
+
+            try {
+                Slog.i(TAG, &quot;DiskStats Service&quot;);
+                ServiceManager.addService(&quot;diskstats&quot;, new DiskStatsService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting DiskStats Service&quot;, e);
+            }
+
+            // 在这里假如我们写的硬件访问服务FregService;
+            try {
+                Slog.i(TAG, &quot;Freg Service&quot;);
+                ServiceManager.addService(&quot;freg&quot;, new FregService());
+            } catch (Throwable e) {
+                Slog.e(TAG, &quot;Failure starting Freg Service&quot;, e);
+            }
+        }
+
+        // make sure the ADB_ENABLED setting value matches the secure property value
+        Settings.Secure.putInt(mContentResolver, Settings.Secure.ADB_ENABLED,
+                &quot;1&quot;.equals(SystemProperties.get(&quot;persist.service.adb.enable&quot;)) ? 1 : 0);
+
+        // register observer to listen for settings changes
+        mContentResolver.registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ADB_ENABLED),
+                false, new AdbSettingsObserver());
+
+        // Before things start rolling, be sure we have decided whether
+        // we are in safe mode.
+        final boolean safeMode = wm.detectSafeMode();
+        if (safeMode) {
+            try {
+                ActivityManagerNative.getDefault().enterSafeMode();
+                // Post the safe mode state in the Zygote class
+                Zygote.systemInSafeMode = true;
+                // Disable the JIT for the system_server process
+                VMRuntime.getRuntime().disableJitCompilation();
+            } catch (RemoteException e) {
+            }
+        } else {
+            // Enable the JIT for the system_server process
+            VMRuntime.getRuntime().startJitCompilation();
+        }
+
+        // It is now time to start up the app processes...
+
+        if (devicePolicy != null) {
+            devicePolicy.systemReady();
+        }
+
+        if (notification != null) {
+            notification.systemReady();
+        }
+
+        if (statusBar != null) {
+            statusBar.systemReady();
+        }
+        wm.systemReady();
+        power.systemReady();
+        try {
+            pm.systemReady();
+        } catch (RemoteException e) {
+        }
+
+        // These are needed to propagate to the runnable below.
+        final StatusBarManagerService statusBarF = statusBar;
+        final BatteryService batteryF = battery;
+        final ConnectivityService connectivityF = connectivity;
+        final DockObserver dockF = dock;
+        final UsbService usbF = usb;
+        final ThrottleService throttleF = throttle;
+        final UiModeManagerService uiModeF = uiMode;
+        final AppWidgetService appWidgetF = appWidget;
+        final WallpaperManagerService wallpaperF = wallpaper;
+        final InputMethodManagerService immF = imm;
+        final RecognitionManagerService recognitionF = recognition;
+        final LocationManagerService locationF = location;
+
+        // We now tell the activity manager it is okay to run third party
+        // code. It will call back into us once it has gotten to the state
+        // where third party code can really run (but before it has actually
+        // started launching the initial applications), for us to complete our
+        // initialization.
+        ((ActivityManagerService) ActivityManagerNative.getDefault())
+                .systemReady(new Runnable() {
+                    public void run() {
+                        Slog.i(TAG, &quot;Making services ready&quot;);
+
+                        if (statusBarF != null)
+                            statusBarF.systemReady2();
+                        if (batteryF != null)
+                            batteryF.systemReady();
+                        if (connectivityF != null)
+                            connectivityF.systemReady();
+                        if (dockF != null)
+                            dockF.systemReady();
+                        if (usbF != null)
+                            usbF.systemReady();
+                        if (uiModeF != null)
+                            uiModeF.systemReady();
+                        if (recognitionF != null)
+                            recognitionF.systemReady();
+                        Watchdog.getInstance().start();
+
+                        // It is now okay to let the various system services start their
+                        // third party code...
+
+                        if (appWidgetF != null)
+                            appWidgetF.systemReady(safeMode);
+                        if (wallpaperF != null)
+                            wallpaperF.systemReady();
+                        if (immF != null)
+                            immF.systemReady();
+                        if (locationF != null)
+                            locationF.systemReady();
+                        if (throttleF != null)
+                            throttleF.systemReady();
+                    }
+                });
+
+        // For debug builds, log event loop stalls to dropbox for analysis.
+        if (StrictMode.conditionallyEnableDebugLogging()) {
+            Slog.i(TAG, &quot;Enabled StrictMode for system server main thread.&quot;);
+        }
+
+        Looper.loop();
+        Slog.d(TAG, &quot;System ServerThread is exiting!&quot;);
+    }
+}
+
+class DemoThread extends Thread {
+    DemoThread(Context context) {
+        mContext = context;
+    }
+
+    @Override
+    public void run() {
+        try {
+            Cursor c = mContext.getContentResolver().query(People.CONTENT_URI, null, null, null, null);
+            boolean hasData = c != null &amp;&amp; c.moveToFirst();
+            if (c != null) {
+                c.deactivate();
+            }
+            if (!hasData) {
+                DemoDataSet dataset = new DemoDataSet();
+                dataset.add(mContext);
+            }
+        } catch (Throwable e) {
+            Slog.e(&quot;SystemServer&quot;, &quot;Failure installing demo data&quot;, e);
+        }
+
+    }
+
+    Context mContext;
+}
+
+public class SystemServer {
+    private static final String TAG = &quot;SystemServer&quot;;
+
+    public static final int FACTORY_TEST_OFF = 0;
+    public static final int FACTORY_TEST_LOW_LEVEL = 1;
+    public static final int FACTORY_TEST_HIGH_LEVEL = 2;
+
+    static Timer timer;
+    static final long SNAPSHOT_INTERVAL = 60 * 60 * 1000; // 1hr
+
+    // The earliest supported time. We pick one day into 1970, to
+    // give any timezone code room without going into negative time.
+    private static final long EARLIEST_SUPPORTED_TIME = 86400 * 1000;
+
+    /**
+     * This method is called from Zygote to initialize the system. This will cause
+     * the native
+     * services (SurfaceFlinger, AudioFlinger, etc..) to be started. After that it
+     * will call back
+     * up into init2() to start the Android services.
+     */
+    native public static void init1(String[] args);
+
+    public static void main(String[] args) {
+        if (System.currentTimeMillis() &lt; EARLIEST_SUPPORTED_TIME) {
+            // If a device's clock is before 1970 (before 0), a lot of
+            // APIs crash dealing with negative numbers, notably
+            // java.io.File#setLastModified, so instead we fake it and
+            // hope that time from cell towers or NTP fixes it
+            // shortly.
+            Slog.w(TAG, &quot;System clock is before 1970; setting to 1970.&quot;);
+            SystemClock.setCurrentTimeMillis(EARLIEST_SUPPORTED_TIME);
+        }
+
+        if (SamplingProfilerIntegration.isEnabled()) {
+            SamplingProfilerIntegration.start();
+            timer = new Timer();
+            timer.schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    SamplingProfilerIntegration.writeSnapshot(&quot;system_server&quot;);
+                }
+            }, SNAPSHOT_INTERVAL, SNAPSHOT_INTERVAL);
+        }
+
+        // The system server has to run all of the time, so it needs to be
+        // as efficient as possible with its memory usage.
+        VMRuntime.getRuntime().setTargetHeapUtilization(0.8f);
+
+        System.loadLibrary(&quot;android_servers&quot;);
+        init1(args);
+    }
+
+    public static final void init2() {
+        Slog.i(TAG, &quot;Entered the Android system server!&quot;);
+        Thread thr = new ServerThread();
+        thr.setName(&quot;android.server.ServerThread&quot;);
+        thr.start();
+    }
+}
+</code></pre>
+<p>系统进程 System 在启动时，会创建一个 ServerThread 线程来启动系统中的关键服务，其中就包括一些硬件访问服务。在 ServerThread 类的成员函数 run 中，首先创建一个 FregService 实例，然后把它注册到 Service Manager 中。Service Manager 是 Android 系统的 Binder 进程间通信机制的一个重要角色，它负责管理系统中的服务对象。注册到 Service Manager 中的服务对象都有一个对应的名称，使用这些服务的 Client 进程就是通过这些名称来向 Service Manager 请求它们的 Binder 代理对象接口的，以便可以访问它们所提供的服务。硬件访问服务 FregService 注册到 Service Manager 之后，它的启动过程就完成了。</p>
+<h3 id="编译-4">编译</h3>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./frameworks/base/services/java/
+
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1'
+target Java: services (out/target/common/obj/JAVA_LIBRARIES/services_intermediates/classes)
+frameworks/base/services/java/com/android/server/FregService.java:13: warning: unmappable character for encoding ascii
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+100 warnings
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/classes-jarjar.jar
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/emma_out/lib/classes-jarjar.jar
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/classes.jar
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/noproguard.classes.jar
+target Dex: services
+Copying: out/target/common/obj/JAVA_LIBRARIES/services_intermediates/noproguard.classes.dex
+target Jar: services (out/target/common/obj/JAVA_LIBRARIES/services_intermediates/javalib.jar)
+ 'out/target/common/obj/JAVA_LIBRARIES/services_intermediates//classes.dex' as 'classes.dex'...
+Install: out/target/product/generic/system/framework/services.jar
+make: Leaving directory `/home/dt/2.3.1_r1'
+</code></pre>
+<p>编译后得到的 services.jar 文件就包含有硬件访问服务 FregService，并且在系统启动时，将它运行在系统进程 System中了。</p>
+<p>至此，硬件访问服务 FregService 就完全实现好了。我们可以执行 make snod 命令来重新打包 Android 系统镜像文件 system.img 。</p>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[[实验1_kernel]_[2.1_开发Android硬件驱动程序_kernel]]]></title>
+        <id>https://pinggle.github.io/post/shi-yan-1_kernel_21_-kai-fa-android-ying-jian-qu-dong-cheng-xu/</id>
+        <link href="https://pinggle.github.io/post/shi-yan-1_kernel_21_-kai-fa-android-ying-jian-qu-dong-cheng-xu/">
+        </link>
+        <updated>2025-02-10T02:55:31.000Z</updated>
+        <content type="html"><![CDATA[<p>[实验1_kernel]_[2.1_开发Android硬件驱动程序]</p>
+<h1 id="开发freg硬件驱动程序_kernel">开发freg硬件驱动程序_kernel</h1>
+<h2 id="自己创建freg驱动">自己创建freg驱动</h2>
+<h3 id="fregh">freg.h</h3>
+<pre><code class="language-C">#ifndef _FAKE_REG_H_
+#define _FAKE_REG_H_
+
+#include &lt;linux/cdev.h&gt;
+#include &lt;linux/semaphore.h&gt;
+
+#define FREG_DEVICE_NODE_NAME  &quot;freg&quot;
+#define FREG_DEVICE_FILE_NAME  &quot;freg&quot;
+#define FREG_DEVICE_PROC_NAME  &quot;freg&quot;
+#define FREG_DEVICE_CLASS_NAME &quot;freg&quot;
+
+struct fake_reg_dev {
+    int val;
+    struct semaphore sem;
+    struct cdev dev;
+};
+
+#endif
+</code></pre>
+<h3 id="fregc">freg.c</h3>
+<pre><code class="language-C">#include &lt;linux/init.h&gt;
+#include &lt;linux/module.h&gt;
+#include &lt;linux/types.h&gt;
+#include &lt;linux/fs.h&gt;
+#include &lt;linux/proc_fs.h&gt;
+#include &lt;linux/device.h&gt;
+#include &lt;asm/uaccess.h&gt;
+
+#include &quot;freg.h&quot;
+
+/*
+
+ freg模块的加载与卸载:
+    freg_init: 加载，主要用来注册和初始化虚拟硬件设备freg;
+    freg_exit: 卸载，主要用来反注册和释放虚拟硬件设备freg;
+
+ 传统设备文件系统接口:
+    freg_open: 打开
+    freg_release: 关闭
+    freg_read: 读;
+    freg_write: 写;
+
+ devfs文件系统接口，将虚拟硬件设备freg的寄存器val当做设备的一个属性，通过读写这个属性就可以达到访问设备的目的。
+    freg_val_show: 读设备属性val的值;
+    freg_val_store: 写设备属性val的值;
+
+ proc文件系统接口:
+    freg_proc_read: 读;
+    freg_proc_write: 写;
+    freg_create_proc: 创建;
+        create_proc_entry: 在/proc目录下创建一个文件 ，这种文件用户态将不支持file接口读写，只能用cat命令查看。
+    freg_remove_proc: 删除;
+
+问：这三种方式的接口，就读和写来说，有什么区别？为什么不是统一成一个函数进行读和写？
+三种方式对应不同的硬件驱动设备不一样：
+传统设备文件系统接口对应：/dev/freg;
+devfs文件系统接口对应: /sys/class/freg/freg;
+proc文件系统接口对应: /proc/freg;
+因为设备不一样，在创建时对应linux底层接口也不一样，这样就导致了访问时的差异性，最终读写的函数实现也不一样。
+
+**********************************/
+
+/* 主设备号和从设备号变量 */
+static int freg_major = 0;
+static int freg_minor = 0;
+
+/* 设备类别和设备变量 */
+static struct class* freg_class = NULL;
+static struct fake_reg_dev* freg_dev = NULL;
+
+/* 传统的设备文件操作方法 */
+static int freg_open(struct inode* inode, struct file* filp);
+static int freg_release(struct inode* inode, struct file* filp);
+static ssize_t freg_read(struct file* filp, char __user *buf, size_t count, loff_t* f_pos);
+static ssize_t freg_write(struct file* filp, const char __user *buf, size_t count, loff_t* f_pos);
+
+/* 传统的设备文件操作方法表 */
+static struct file_operations freg_fops = {
+        .owner = THIS_MODULE,
+        .open = freg_open,
+        .release = freg_release,
+        .read = freg_read,
+        .write = freg_write,
+};
+
+/* devfs 文件系统的设备属性操作方法 */
+static ssize_t freg_val_show(struct device* dev, struct device_attribute* attr,  char* buf);
+static ssize_t freg_val_store(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
+
+/* devfs 文件系统的设备属性 */
+static DEVICE_ATTR(val, S_IRUGO | S_IWUSR, freg_val_show, freg_val_store);
+
+/* 打开设备方法 */
+static int freg_open(struct inode* inode, struct file* filp) {
+    struct fake_reg_dev* dev;
+   
+    /* 将自定义设备结构体保存在文件指针的私有数据域中，以便访问设备时可以直接拿来用 */
+    dev = container_of(inode-&gt;i_cdev, struct fake_reg_dev, dev);
+    filp-&gt;private_data = dev;
+    /*  container_of是定义在linux内核kernel.h中的一个宏，
+        它的作用是根据结构体中某个成员的地址反推出该结构体的地址。
+        container_of之所以能做到这点，得归功于linux的内存管理方式在逻辑上是连续的这一特性。
+    */
+
+    return 0;
+}
+
+/* 设备文件释放时调用，空实现 */
+static int freg_release(struct inode* inode, struct file* filp) {
+    return 0;
+}
+
+/* 读取设备的寄存器val的值 */
+static ssize_t freg_read(struct file* filp, char __user *buf, size_t count, loff_t* f_pos) {
+    ssize_t err = 0;
+    struct fake_reg_dev* dev = filp-&gt;private_data;
+
+    /* 同步访问，获得信号量 */
+    if(down_interruptible(&amp;(dev-&gt;sem))) {  
+        return -ERESTARTSYS;
+    }
+    /*  int down_interruptible(struct semaphore *sem)
+        这个函数的功能就是获得信号量，如果得不到信号量就睡眠，此时没有信号打断，那么进入睡眠。
+        但是在睡眠过程中可能被信号打断，打断之后返回-EINTR，主要用来进程间的互斥同步。
+    */
+
+    if(count &lt; sizeof(dev-&gt;val)) {
+        goto out;
+    }
+
+    /* 将寄存器val的值复制到用户提供的缓冲区中 */
+    if(copy_to_user(buf, &amp;(dev-&gt;val), sizeof(dev-&gt;val))) {
+        err = -EFAULT;
+        goto out;
+    }
+    /*  copy_to_user
+        unsigned long copy_to_user(void *to, const void *from, unsigned long n);
+        这个函数的作用是将内核空间的数据复制到用户空间。其中
+            to：目标地址（用户空间）
+            from：源地址（内核空间）
+            n：将要拷贝数据的字节数
+            返回：成功返回0，失败返回没有拷贝成功的数据字节数
+    */
+
+    err = sizeof(dev-&gt;val);
+
+out:
+    up(&amp;(dev-&gt;sem));
+    /*  对临界资源访问完毕后，可以调用原子操作up()来释放信号量，该操作会增加信号量的计数器。
+        如果该信号量上的等待队列不为空，则唤醒阻塞在该信号量上的进程。
+    */
+    return err;
+}
+
+/* 写设备的寄存器val的值 */
+static ssize_t freg_write(struct file* filp, const char __user *buf, size_t count, loff_t* f_pos) {
+    struct fake_reg_dev* dev = filp-&gt;private_data;
+    ssize_t err = 0;
+
+    /* 同步访问，获得信号量 */
+    if(down_interruptible(&amp;(dev-&gt;sem))) {
+            return -ERESTARTSYS;
+    }
+
+    if(count != sizeof(dev-&gt;val)) {
+            goto out;
+    }
+
+    /* 将用户提供的缓存区的值写到设备寄存器中 */
+    if(copy_from_user(&amp;(dev-&gt;val), buf, count)) {
+        err = -EFAULT;
+        goto out;
+    }
+    /*  copy_from_user()这个函数的完整形态为
+        unsigned long copy_from_user(void *to, const void *from, unsigned long n);
+        这个函数的作用是将用户空间的数据复制到内核空间。其中
+            to：目标地址（内核空间）
+            from：源地址（用户空间）
+            n：将要拷贝数据的字节数
+            返回：成功返回0，失败返回没有拷贝成功的数据字节数
+    */
+
+    err = sizeof(dev-&gt;val);
+
+out:
+    up(&amp;(dev-&gt;sem));
+    return err;
+}
+
+/* 将寄存器val的值读取到缓冲区buf中，内部使用 */
+static ssize_t __freg_get_val(struct fake_reg_dev* dev, char* buf) {
+    int val = 0;
+
+    /* 同步访问，获得信号量 */
+    if(down_interruptible(&amp;(dev-&gt;sem))) {
+            return -ERESTARTSYS;
+    }
+
+    val = dev-&gt;val;
+    /* 释放信号量 */
+    up(&amp;(dev-&gt;sem));
+
+    return snprintf(buf, PAGE_SIZE, &quot;%d\n&quot;, val);
+}
+
+/* 将缓冲区buf的值写到设备寄存器val中，内部使用 */
+static ssize_t __freg_set_val(struct fake_reg_dev* dev, const char* buf, size_t count) {
+    int val = 0;
+
+    /* 将字符串转换成数字 */
+    val = simple_strtol(buf, NULL, 10);
+    /* simple_strtol，把一个字符串转换为一个有符号长整数；*/
+
+    /* 同步访问，获得信号量 */
+    if(down_interruptible(&amp;(dev-&gt;sem))) {
+        return -ERESTARTSYS;
+    }
+
+    dev-&gt;val = val;
+    /* 释放信号量 */
+    up(&amp;(dev-&gt;sem));
+
+    return count;
+}
+
+/* 读设备属性val的值 */
+static ssize_t freg_val_show(struct device* dev, struct device_attribute* attr, char* buf) {
+    struct fake_reg_dev* hdev = (struct fake_reg_dev*)dev_get_drvdata(dev);
+   
+        return __freg_get_val(hdev, buf);
+}
+
+/* 写设备属性val的值 */
+static ssize_t freg_val_store(struct device* dev, struct device_attribute* attr, const char* buf, size_t count) {
+     struct fake_reg_dev* hdev = (struct fake_reg_dev*)dev_get_drvdata(dev);
+
+        return __freg_set_val(hdev, buf, count);
+}
+
+/* 读取设备寄存器val的值，保存到page缓冲区中 */
+static ssize_t freg_proc_read(char* page, char** start, off_t off, int count, int* eof, void* data) {
+    if(off &gt; 0) {
+        *eof = 1;
+        return 0;
+    }
+
+    return __freg_get_val(freg_dev, page);  
+}
+
+/* 把缓冲区的值buff保存到设备寄存器中 */
+static ssize_t freg_proc_write(struct file* filp, const char __user *buff, unsigned long len, void* data) {
+    int err = 0;
+    char* page = NULL;
+
+    if(len &gt; PAGE_SIZE) {
+        printk(KERN_ALERT&quot;The buff is too large: %lu.\n&quot;, len);
+        return -EFAULT;
+    }
+
+    /* __get_free_page() 分配连续的物理地址，用于整页分配。*/
+    page = (char*)__get_free_page(GFP_KERNEL);
+    if(!page) {
+        printk(KERN_ALERT&quot;Failed to alloc page.\n&quot;);
+        return -ENOMEM;
+    }
+   
+    /* 先把用户提供的缓冲区的值复制到内核缓冲区中 */
+    if(copy_from_user(page, buff, len)) {
+        printk(KERN_ALERT&quot;Failed to copy buff from user.\n&quot;);
+        err = -EFAULT;
+        goto out;
+    }
+
+    /* 自定义函数，把缓冲区buf的值写到设备寄存器val中，内部使用 */
+    err = __freg_set_val(freg_dev, page, len);
+
+out:
+    /* 释放内存页，与__get_free_page配对 */
+    free_page((unsigned long)page);
+    return err;
+}
+
+/* 创建 /proc/freg 文件 */
+static void freg_create_proc(void) {
+    struct proc_dir_entry* entry;
+   
+    entry = create_proc_entry(FREG_DEVICE_PROC_NAME, 0, NULL);
+    if(entry) {
+        entry-&gt;owner = THIS_MODULE;
+        entry-&gt;read_proc = freg_proc_read;
+        entry-&gt;write_proc = freg_proc_write;
+    }
+    /*  create_proc_entry(在/proc目录下创建一个文件 ，
+        这种文件用户态将不支持file接口读写，只能用cat命令查看) */
+}
+
+/* 删除 /proc/freg 文件 */
+static void freg_remove_proc(void) {
+    remove_proc_entry(FREG_DEVICE_PROC_NAME, NULL);
+    /* remove_proc_entry() 是Linux 内核中用于删除proc 文件系统中某个进程文件的函数。*/
+}
+
+/* 初始化设备*/
+static int  __freg_setup_dev(struct fake_reg_dev* dev) {
+    int err;
+    dev_t devno = MKDEV(freg_major, freg_minor);
+    /* 宏 MKDEV 用于将给定的主设备号和次设备号的值组合成 dev_t 类型的设备号。*/
+
+    memset(dev, 0, sizeof(struct fake_reg_dev));
+
+    /* 初始化字符设备 */
+    cdev_init(&amp;(dev-&gt;dev), &amp;freg_fops);
+    dev-&gt;dev.owner = THIS_MODULE;
+    dev-&gt;dev.ops = &amp;freg_fops;
+    /*  void cdev_init(struct cdev *cdev, const struct file_operations *fops)
+        功能：用于初始化cdev结构体，并填充其成员ops
+        参数：cdev：字符设备；fops ：驱动操作函数集合
+    */
+
+    /* 注册字符设备 */
+    err = cdev_add(&amp;(dev-&gt;dev),devno, 1);
+    if(err) {
+        return err;
+    }  
+    /*  cdev_add函数主要是将cdev加入到cdev_map中，然后将cdev的kobject成员的parent对象的kref成员加1 */
+
+    /* 初始化信号量和寄存器val的值 */
+    init_MUTEX(&amp;(dev-&gt;sem));
+    dev-&gt;val = 0;
+    /*  Init_MUTEX()函数初始化信号量为互斥量。 互斥量为信号量的特例，它可以防止数据被两个不同系统调用读写。
+        2.6.25及以后的linux内核版本废除了init_MUTEX函数,  新版本使用sema_init函数; */
+
+    return 0;
+}
+
+/* 模块加载方法 */
+static int __init freg_init(void) {
+    int err = -1;
+    dev_t dev = 0;
+    struct device* temp = NULL;
+
+    printk(KERN_ALERT&quot;Initializing freg device.\n&quot;);
+
+    /* 动态分配主设备号和从设备号 */
+    err = alloc_chrdev_region(&amp;dev, 0, 1, FREG_DEVICE_NODE_NAME);
+    if(err &lt; 0) {
+        printk(KERN_ALERT&quot;Failed to alloc char dev region.\n&quot;);
+        goto fail;
+    }
+    /* alloc_chrdev_region() 函数用于动态申请设备编号范围，这个函数好像并没有检查范围过大的情况，
+    不过动态分配总是找个空的散列桶，所以问题也不大。通过指针参数返回实际获得的起始设备编号。*/
+
+    freg_major = MAJOR(dev);
+    freg_minor = MINOR(dev);
+    /*  #define MINORBITS   20
+        #define MINORMASK   ((1U &lt;&lt; MINORBITS) - 1)
+        #define MAJOR(dev)  ((unsigned int) ((dev) &gt;&gt; MINORBITS))
+        #define MINOR(dev)  ((unsigned int) ((dev) &amp; MINORMASK))
+    */
+
+    /* 分配 freg 设备结构体; */
+    freg_dev = kmalloc(sizeof(struct fake_reg_dev), GFP_KERNEL);
+    if(!freg_dev) {
+        err = -ENOMEM;
+        printk(KERN_ALERT&quot;Failed to alloc freg device.\n&quot;);
+        goto unregister;
+    }
+
+    /* 初始化设备，自定义函数 */
+    err = __freg_setup_dev(freg_dev);
+    if(err) {
+        printk(KERN_ALERT&quot;Failed to setup freg device: %d.\n&quot;, err);
+        goto cleanup;
+    }
+
+    /* 在 /sys/class/ 目录下创建设备类别目录freg */
+    freg_class = class_create(THIS_MODULE, FREG_DEVICE_CLASS_NAME);
+    if(IS_ERR(freg_class)) {
+        err = PTR_ERR(freg_class);
+        printk(KERN_ALERT&quot;Failed to create freg device class.\n&quot;);
+        goto destroy_cdev;
+    }
+    /*  class_create动态创建设备的逻辑类，并完成部分字段的初始化，然后将其添加到内核中。
+        创建的逻辑类位于/sys/class/。 */
+
+    /* 在 /dev/ 目录和 /sys/class/freg 目录下分别创建设备文件freg */
+    temp = device_create(freg_class, NULL, dev, &quot;%s&quot;, FREG_DEVICE_FILE_NAME);
+    if(IS_ERR(temp)) {
+        err = PTR_ERR(temp);
+        printk(KERN_ALERT&quot;Failed to create freg device.\n&quot;);
+        goto destroy_class;
+    }
+    /*  创建设备文件 device_create();
+        device_create(led_class, NULL, dev, NULL, NAME);
+        这个函数用来给应用层mdev在/dev下创建设备节点。*/
+
+    /* 在 /sys/class/freg/freg 目录下创建属性文件 val */
+    err = device_create_file(temp, &amp;dev_attr_val);
+    if(err &lt; 0) {
+        printk(KERN_ALERT&quot;Failed to create attribute val of freg device.\n&quot;);
+                goto destroy_device;
+    }
+    /* device_create_file，使用这个函数时要引用 device_create 所返回的 device* 指针，
+        作用是在 /sys/class/ 下创建一个属性文件，从而通过对这个属性文件进行读写就能完成对应的数据操作。
+    */
+
+    dev_set_drvdata(temp, freg_dev);
+    /*  dev_set_drvdata函数用来设置 device 的私有数据，
+        dev_get_drvdata函数用来获取 device 的私有数据。
+    */
+
+    /* 创建 /proc/freg 文件，自定义函数 */
+    freg_create_proc();
+
+    printk(KERN_ALERT&quot;Succedded to initialize freg device.\n&quot;);
+
+    return 0;
+
+destroy_device:
+    device_destroy(freg_class, dev); // 清除设备;
+    /*  函数device_destroy()用于从linux内核系统设备驱动程序模型中移除一个设备，
+        并删除/sys/devices/virtual目录下对应的设备目录及/dev/目录下对应的设备文件*/
+destroy_class:
+    class_destroy(freg_class);  // 清除类;
+    /*  函数class_destroy()用于删除设备的逻辑类，即从Linux内核系统中删除设备的逻辑类。 */
+destroy_cdev:
+    cdev_del(&amp;(freg_dev-&gt;dev)); // 清除设备号;
+    /* 删除一个cdev，完成字符设备的注册和注销，释放 cdev 占用的内存。*/
+cleanup:
+    kfree(freg_dev);
+unregister:
+    unregister_chrdev_region(MKDEV(freg_major, freg_minor), 1);     // 取消注册字符设备;
+fail:
+    return err;
+}
+
+/* 模块卸载方法 */
+static void __exit freg_exit(void) {
+    dev_t devno = MKDEV(freg_major, freg_minor);
+
+    printk(KERN_ALERT&quot;Destroy freg device.\n&quot;);
+   
+    /* 删除 /proc/freg 文件，自定义函数 */
+    freg_remove_proc();
+
+    /* 销毁设备类别和设备 */
+    if(freg_class) {
+        device_destroy(freg_class, MKDEV(freg_major, freg_minor));
+        class_destroy(freg_class);
+    }
+
+    /* 删除字符设备和释放设备内存 */
+    if(freg_dev) {
+        cdev_del(&amp;(freg_dev-&gt;dev));
+        kfree(freg_dev);
+    }
+
+    /* 释放设备号资源 */
+    unregister_chrdev_region(devno, 1);
+}
+
+MODULE_LICENSE(&quot;GPL&quot;);
+MODULE_DESCRIPTION(&quot;Fake Register Driver&quot;);
+
+module_init(freg_init);
+module_exit(freg_exit);
+</code></pre>
+<h3 id="kconfig">Kconfig</h3>
+<pre><code class="language-makefile">config FREG
+    tristate &quot;Fake Register Driver&quot;
+    default n
+    help
+    This is the freg driver for android system.
+
+</code></pre>
+<p>三种方式编译：</p>
+<ul>
+<li>【*】直接内建到内核中；</li>
+<li>【M】编译成内核模块；</li>
+<li>【n】不编译到内核中；</li>
+</ul>
+<h3 id="makefile">Makefile</h3>
+<pre><code class="language-makefile">obj-$(CONFIG_FREG) += freg.o
+</code></pre>
+<h2 id="修改内核kconfig文件">修改内核Kconfig文件</h2>
+<p>不配置内核的Kconfig文件，make menuconfig 就找不到我们编写的freg驱动。所以，我们要修改内核的根Kconfig文件，使得编译系统能够找到驱动程序freg的Kconfig文件。</p>
+<p>vim arch/arm/Kconfig</p>
+<pre><code class="language-makefile">menu &quot;Device Drivers&quot;
+source &quot;drivers/freg/Kconfig&quot;
+...
+endmenu
+</code></pre>
+<h2 id="修改内核makefile文件">修改内核Makefile文件</h2>
+<p>不配置内核的Makefile文件，编译系统就无法找到驱动程序freg的Makefile文件，就无法编译freg驱动。</p>
+<p>vim drivers/Makefile</p>
+<pre><code class="language-makefile">// 在文件里面添加如下一行
+obj-$(CONFIG_FREG) += freg/
+</code></pre>
+<h2 id="编译内核驱动程序模块">编译内核驱动程序模块</h2>
+<p>执行 make menuconfig</p>
+<p>2，配置freg驱动选项；</p>
+<ul>
+<li>【Device Drivers】-&gt;【Fake Register Driver】使前面方括号中的字符变成 &quot;*&quot;</li>
+</ul>
+<p>3，编译：make，输出新的 zImage 文件，就是我们需要的内核镜像文件，在 arch/arm/boot 目录下</p>
+<pre><code class="language-shell">goldfish$ make menuconfig
+dt@ubuntu:~/goldfish$ export PATH=$PATH:~/2.3.1_r1/prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin
+dt@ubuntu:~/goldfish$ make
+  Kernel: arch/arm/boot/zImage is ready
+</code></pre>
+<h2 id="验证内核驱动程序模块">验证内核驱动程序模块</h2>
+<h3 id="1使用新的内核镜像文件-zimage-启动android模拟器adb连接确认-freg-设备存在">1，使用新的内核镜像文件 zImage 启动Android模拟器，adb连接，确认 freg 设备存在：</h3>
+<pre><code class="language-shell">dt@ubuntu:~/goldfish$ cp arch/arm/boot/zImage /mnt/hgfs/AndroidEmulator/images/zImage
+
+[win]&gt; pushd d:\AndroidEmulator
+[win]&gt; start /b emulator.exe -sysdir d:\AndroidEmulator -system images\system.img -data images\userdata.img -ramdisk images\ramdisk.img -kernel images\zImage -skindir d:\AndroidEmulator\skins -skin HVGA
+
+[win]&gt; adb shell
+# ls /dev/freg
+/dev/freg
+# ls /proc/freg
+/proc/freg
+# ls /sys/class/freg/freg/val
+/sys/class/freg/freg/val
+</code></pre>
+<h3 id="2proc文件系统验证">2，proc文件系统验证：</h3>
+<pre><code class="language-shell"># cat /proc/freg
+# echo '5' &gt; /proc/freg
+# cat /proc/freg
+</code></pre>
+<h3 id="3devfs文件系统验证">3，devfs文件系统验证：</h3>
+<pre><code># cd /sys/class/freg/freg
+# cat val
+# echo '2' &gt; val
+# cat val
+</code></pre>
+<p>验证成功标准：写入的值，和后续读取的值一致。</p>
+<h1 id="开发c可执行程序验证android硬件驱动程序_aosp">开发C可执行程序验证Android硬件驱动程序_aosp</h1>
+<p>开发C可执行程序来验证驱动程序freg所提供的dev文件系统接口的正确性，通过调用read和write函数读写设备文件 /dev/freg 的内容来实现。</p>
+<p>在 Android 源代码工程环境中开发的C可执行程序源文件一般保存在 external 目录中，我们也在 aosp/external 目录中新建 freg 目录，作为我们的源代码路径。</p>
+<p>这里有个区别特别说明一下，就是前一节的Android硬件驱动程序是在 kernel 源码里面，现在写的 C 可执行程序，在 aosp 源码里面。</p>
+<h2 id="开发可执行程序">开发可执行程序</h2>
+<h3 id="fregc-2">freg.c</h3>
+<pre><code class="language-C">// 文件路径: aosp/external/freg/freg.c
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;fcntl.h&gt;
+
+#define FREG_DEVICE_NAME &quot;/dev/freg&quot;
+
+int main(int argc, char** argv)
+{
+    int fd = -1;
+    int val = 0;
+
+    fd = open(FREG_DEVICE_NAME, O_RDWR);
+    /* 调用 open 函数，以读写方式打开设备文件 /dev/freg; */
+    if(fd == -1)
+    {
+        printf(&quot;Failed to open device %s.\n&quot;, FREG_DEVICE_NAME);
+        return -1;
+    }
+   
+    printf(&quot;Read original value:\n&quot;);
+    read(fd, &amp;val, sizeof(val));
+    /* 调用 read 函数，读取虚拟硬件设备freg的寄存器val的内容; */
+    printf(&quot;%d.\n\n&quot;, val);
+
+    val = 5;
+    printf(&quot;Write value %d to %s.\n\n&quot;, val, FREG_DEVICE_NAME);
+    write(fd, &amp;val, sizeof(val));
+    /* 调用 write 函数，将整数 5 写入到虚拟硬件设备freg的寄存器val中; */
+   
+    printf(&quot;Read the value again:\n&quot;);
+    read(fd, &amp;val, sizeof(val));
+    /* 读取刚才我们写入的值，并打印出来; */
+    printf(&quot;%d.\n\n&quot;, val);
+
+    close(fd);
+
+    return 0;
+}
+</code></pre>
+<h3 id="androidmk">Android.mk</h3>
+<pre><code class="language-makefile">LOCAL_PATH := $(call my-dir)
+include $(CLEAR_VARS)
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE := freg
+LOCAL_SRC_FILES := $(call all-subdir-c-files)
+include $(BUILD_EXECUTABLE)
+</code></pre>
+<p>Anddroid.mk最后一行，include命令后面跟的参数的值为 $(BUILD_EXECUTABLE)，表示当前要编译的是一个可执行应用程序模块，并且编译后的文件，最终在系统的 /system/bin 目录下。</p>
+<h2 id="编译freg可执行文件">编译freg可执行文件</h2>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ export PATH=$PATH:/home/dt/2.3.1_r1/out/host/linux-x86/bin
+dt@ubuntu:~/2.3.1_r1$ source build/envsetup.sh 
+including device/htc/passion/vendorsetup.sh
+including device/samsung/crespo/vendorsetup.sh
+dt@ubuntu:~/2.3.1_r1$ mmm ./external/freg/                                      
+============================================
+PLATFORM_VERSION_CODENAME=REL
+PLATFORM_VERSION=2.3.1
+TARGET_PRODUCT=generic
+TARGET_BUILD_VARIANT=eng
+TARGET_SIMULATOR=
+TARGET_BUILD_TYPE=release
+TARGET_BUILD_APPS=
+TARGET_ARCH=arm
+HOST_ARCH=x86
+HOST_OS=linux
+HOST_BUILD_TYPE=release
+BUILD_ID=GRH78
+============================================
+make: Entering directory `/home/dt/2.3.1_r1'
+target Non-prelinked: freg (out/target/product/generic/symbols/system/bin/freg)
+Install: out/target/product/generic/system/bin/freg
+make: Leaving directory `/home/dt/2.3.1_r1'
+dt@ubuntu:~/2.3.1_r1$ make snod
+Target system fs image: out/target/product/generic/system.img
+
+</code></pre>
+<h2 id="测试验证">测试验证</h2>
+<pre><code class="language-shell">dt@ubuntu:~/2.3.1_r1$ cp out/target/product/generic/system.img /mnt/hgfs/AndroidEmulator/images/system.img
+
+[win]&gt; pushd d:\AndroidEmulator
+[win]&gt; start /b emulator.exe -sysdir d:\AndroidEmulator -system images\system.img -data images\userdata.img -ramdisk images\ramdisk.img -kernel images\zImage -skindir d:\AndroidEmulator\skins -skin HVGA
+
+[win]&gt; adb shell
+# ls system/bin/freg
+system/bin/freg
+# system/bin/freg
+Read original value:
+0.
+
+Write value 5 to /dev/freg.
+
+Read the value again:
+5.
+
+</code></pre>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[学习日语五十音]]></title>
+        <id>https://pinggle.github.io/post/xue-xi-ri-yu-wu-shi-yin/</id>
+        <link href="https://pinggle.github.io/post/xue-xi-ri-yu-wu-shi-yin/">
+        </link>
+        <updated>2024-05-16T03:30:23.000Z</updated>
+        <content type="html"><![CDATA[<p>如下图<br>
+<img src="https://pinggle.github.io/post-images/1715830294278.png" alt="" loading="lazy"></p>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Hello Gridea]]></title>
+        <id>https://pinggle.github.io/post/hello-gridea/</id>
+        <link href="https://pinggle.github.io/post/hello-gridea/">
+        </link>
+        <updated>2018-12-11T16:00:00.000Z</updated>
+        <summary type="html"><![CDATA[<p>👏  欢迎使用 <strong>Gridea</strong> ！<br>
+✍️  <strong>Gridea</strong> 一个静态博客写作客户端。你可以用它来记录你的生活、心情、知识、笔记、创意... ...</p>
+]]></summary>
+        <content type="html"><![CDATA[<p>👏  欢迎使用 <strong>Gridea</strong> ！<br>
+✍️  <strong>Gridea</strong> 一个静态博客写作客户端。你可以用它来记录你的生活、心情、知识、笔记、创意... ...</p>
+<!-- more -->
+<p><a href="https://github.com/getgridea/gridea">Github</a><br>
+<a href="https://gridea.dev/">Gridea 主页</a><br>
+<a href="https://fehey.com/">示例网站</a></p>
+<h2 id="特性">特性👇</h2>
+<p>📝  你可以使用最酷的 <strong>Markdown</strong> 语法，进行快速创作</p>
+<p>🌉  你可以给文章配上精美的封面图和在文章任意位置插入图片</p>
+<p>🏷️  你可以对文章进行标签分组</p>
+<p>📋  你可以自定义菜单，甚至可以创建外部链接菜单</p>
+<p>💻  你可以在 <strong>Windows</strong>，<strong>MacOS</strong> 或 <strong>Linux</strong> 设备上使用此客户端</p>
+<p>🌎  你可以使用 <strong>𝖦𝗂𝗍𝗁𝗎𝖻 𝖯𝖺𝗀𝖾𝗌</strong> 或 <strong>Coding Pages</strong> 向世界展示，未来将支持更多平台</p>
+<p>💬  你可以进行简单的配置，接入 <a href="https://github.com/gitalk/gitalk">Gitalk</a> 或 <a href="https://github.com/SukkaW/DisqusJS">DisqusJS</a> 评论系统</p>
+<p>🇬🇧  你可以使用<strong>中文简体</strong>或<strong>英语</strong></p>
+<p>🌁  你可以任意使用应用内默认主题或任意第三方主题，强大的主题自定义能力</p>
+<p>🖥  你可以自定义源文件夹，利用 OneDrive、百度网盘、iCloud、Dropbox 等进行多设备同步</p>
+<p>🌱 当然 <strong>Gridea</strong> 还很年轻，有很多不足，但请相信，它会不停向前 🏃</p>
+<p>未来，它一定会成为你离不开的伙伴</p>
+<p>尽情发挥你的才华吧！</p>
+<p>😘 Enjoy~</p>
+]]></content>
+    </entry>
+</feed>
